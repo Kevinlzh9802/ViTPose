@@ -180,7 +180,8 @@ data = dict(
         #     ),
         dict(
             type='TopDownCocoDataset',
-            ann_file=f'{data_root}/keypoints_and_bboxes_train.json',
+            # ann_file=f'{data_root}/keypoints_and_bboxes_train.json',
+            ann_file=f'{data_root}/keypoints_and_bboxes_train_filtered.json',
             img_prefix=f'{data_root}/images_train/',
             data_cfg=data_cfg,
             pipeline=train_pipeline,
