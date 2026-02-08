@@ -83,69 +83,93 @@
         },
         // python tools/misc/browse_dataset.py configs/body_2d_keypoint/topdown_heatmap/coco/td-hm_hrnet-w32_8xb64-e210_coco-256x192.py --mode original
 
-    //     python demo/top_down_img_demo.py \
-    // ${MMPOSE_CONFIG_FILE} ${MMPOSE_CHECKPOINT_FILE} \
-    // --img-root ${IMG_ROOT} --json-file ${JSON_FILE} \
-    // --out-img-root ${OUTPUT_DIR} \
-    // [--show --device ${GPU_ID or CPU}] \
-    // [--kpt-thr ${KPT_SCORE_THR}]
-    {
-        "name": "top_down_img_demo",
-        "type": "debugpy",
-        "request": "launch",
-        "console": "integratedTerminal",
-        "program": "${workspaceFolder}/demo/top_down_img_demo.py",
-        "args": [                
-            "configs/ViTPose_coco_plus_conflab_w_bg_256x192.py",
-            "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/epoch_1.pth",
-            "--img-root", 
-            "data/conflab/images_test",
-            // "data/conflab/full_test_data/images_test",
-            "--json-file", 
-            "data/conflab/keypoints_and_bboxes_test.json",
-            // "data/conflab/full_test_data/keypoints_and_bboxes_test.json",
-            "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_epoch_1_test",
-            // "--show",
-        ],
-        "justMyCode": true
-    },
-    {
-        "name": "conflab_data_vis",
-        "type": "debugpy",
-        "request": "launch",
-        "console": "integratedTerminal",
-        "program": "${workspaceFolder}/demo/conflab_data_vis.py",
-        "args": [
-            //////////////////////////////
-            // CONFLAB
-            //////////////////////////////
-            "configs/ViTPose_coco_plus_conflab_w_bg_256x192.py",
-            // "--img-root", "data/conflab/images_train",
-            // "--json-file", "data/conflab/keypoints_and_bboxes_train.json",
-            // "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_conflab_gt",
-            "--img-root", "data/conflab/images_test",
-            "--json-file", "data/conflab/keypoints_and_bboxes_test.json",
-            "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_conflab_test_gt",
-            ////////////////////////////
-            // COCO
-            //////////////////////////////
-            // "configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192.py",
-            // "--img-root", "data/coco/train2017",
-            // "--json-file", "data/coco/annotations/person_keypoints_train2017.json",
-            // "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_coco_gt",
-            // //////////////////////////////
-            // // CONFLAB RAW
-            // //////////////////////////////
-            // "configs/ViTPose_coco_plus_conflab_w_bg_256x192.py",
-            // // "--img-root", "data/conflab/images_train",
-            // // "--json-file", "data/conflab/keypoints_and_bboxes_train.json",
-            // // "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_conflab_gt",
-            // "--img-root", "data/conflab-raw/images_train",
-            // "--json-file", "data/conflab-raw/keypoints_and_bboxes_train.json",
-            // "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_conflab_train_raw_gt",
-        ],
-        "justMyCode": true
-    },
+        //     python demo/top_down_img_demo.py \
+        // ${MMPOSE_CONFIG_FILE} ${MMPOSE_CHECKPOINT_FILE} \
+        // --img-root ${IMG_ROOT} --json-file ${JSON_FILE} \
+        // --out-img-root ${OUTPUT_DIR} \
+        // [--show --device ${GPU_ID or CPU}] \
+        // [--kpt-thr ${KPT_SCORE_THR}]
+        {
+            "name": "top_down_img_demo",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "${workspaceFolder}/demo/top_down_img_demo.py",
+            "args": [                
+                "configs/ViTPose_coco_plus_conflab_w_bg_256x192.py",
+                "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/epoch_1.pth",
+                "--img-root", 
+                "data/conflab/images_test",
+                // "data/conflab/full_test_data/images_test",
+                "--json-file", 
+                "data/conflab/keypoints_and_bboxes_test.json",
+                // "data/conflab/full_test_data/keypoints_and_bboxes_test.json",
+                "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_epoch_1_test",
+                // "--show",
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "conflab_data_vis",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "${workspaceFolder}/demo/conflab_data_vis.py",
+            "args": [
+                //////////////////////////////
+                // CONFLAB
+                //////////////////////////////
+                "configs/ViTPose_coco_plus_conflab_w_bg_256x192.py",
+                // "--img-root", "data/conflab/images_train",
+                // "--json-file", "data/conflab/keypoints_and_bboxes_train.json",
+                // "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_conflab_gt",
+                "--img-root", "data/conflab/images_test",
+                "--json-file", "data/conflab/keypoints_and_bboxes_test.json",
+                "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_conflab_test_gt",
+                ////////////////////////////
+                // COCO
+                //////////////////////////////
+                // "configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192.py",
+                // "--img-root", "data/coco/train2017",
+                // "--json-file", "data/coco/annotations/person_keypoints_train2017.json",
+                // "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_coco_gt",
+                // //////////////////////////////
+                // // CONFLAB RAW
+                // //////////////////////////////
+                // "configs/ViTPose_coco_plus_conflab_w_bg_256x192.py",
+                // // "--img-root", "data/conflab/images_train",
+                // // "--json-file", "data/conflab/keypoints_and_bboxes_train.json",
+                // // "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_conflab_gt",
+                // "--img-root", "data/conflab-raw/images_train",
+                // "--json-file", "data/conflab-raw/keypoints_and_bboxes_train.json",
+                // "--out-img-root", "work_dirs/ViTPose_coco_plus_conflab_w_bg_256x192/out_images_conflab_train_raw_gt",
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "visualize-conflab-annotations",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "${workspaceFolder}/tools/dataset/visualize_conflab_annotations.py",
+            "args": [
+                "--ann-file", "data/conflab/keypoints_and_bboxes_train_filtered.json",
+                "--img-root", "data/conflab/images_train",
+                "--out-dir", "data/conflab/vis_train_filtered",
+                "--every-n", "1000",
+            ],
+        },
+        {
+            "name": "filter-conflab-annotations",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "${workspaceFolder}/tools/dataset/filter_conflab_annotations.py",
+            "args": [
+                "--ann-file", "data/conflab/keypoints_and_bboxes_train.json",
+                "--out-file", "data/conflab/keypoints_and_bboxes_train_filtered.json",
+            ],
+        }
     ]
 }
 
