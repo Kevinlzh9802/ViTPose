@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name="vitpose-conflab"
+#SBATCH --job-name="vitpose_conflab"
 #SBATCH --partition=gpu
 #SBATCH --time=2:00:00
 #SBATCH --ntasks=1
@@ -8,8 +8,8 @@
 #SBATCH --gpus-per-task=1
 #SBATCH --mail-type=END
 #SBATCH --account=research-eemcs-insy
-#SBATCH --output=/home/zli33/slurm_outputs/vitpose-conflab/slurm_%j.out
-#SBATCH --error=/home/zli33/slurm_outputs/vitpose-conflab/slurm_%j.err
+#SBATCH --output=/home/zli33/slurm_outputs/vitpose_conflab/slurm_%j.out
+#SBATCH --error=/home/zli33/slurm_outputs/vitpose_conflab/slurm_%j.err
 
 home_path=/home/zli33
 scratch_path=/scratch/zli33
