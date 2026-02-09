@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name="vitpose-conflab"
-#SBATCH --partition=gpu-a100
+#SBATCH --partition=gpu
 #SBATCH --time=2:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12
