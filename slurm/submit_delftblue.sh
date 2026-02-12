@@ -15,10 +15,19 @@ home_path=/home/zli33
 scratch_path=/scratch/zli33
 
 model_path=$scratch_path/models/vitpose_conflab_filtered
-data_path=$scratch_path/data/sam4d/outputs/exp_20260208_220841_DWRI
+data_path=$scratch_path/data/conflab/bbox_kp
+
+# Subfolder under data_path (e.g. cam2); set DATA_SUBFOLDER when submitting
+DATA_SUBFOLDER="${DATA_SUBFOLDER:-cam2}"
+data_subfolder_path="$data_path/$DATA_SUBFOLDER"
+if [[ ! -d "$data_subfolder_path" ]]; then
+  echo "Error: subfolder not found: $data_subfolder_path" >&2
+  exit 1
+fi
+# Path as seen inside the container (data_path is bound to /workspace/data)
+DATA_ROOT="${DATA_ROOT:-/workspace/data/$DATA_SUBFOLDER}"
 
 POSE_CKPT="${POSE_CKPT:-/workspace/models/best_AP_epoch_1.pth}"
-DATA_ROOT="${DATA_ROOT:-/workspace/data/masklets}"
 
 export APPTAINER_CWD=/workspace
 apptainer run \
