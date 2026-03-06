@@ -41,7 +41,7 @@ OUT_DIR=/home/nfs/svacanas/outputs/vitpose/${BATCH}
 mkdir -p ${OUT_DIR}
 
 # Unzip images to /tmp — zip contains flat jpgs (no images/ subfolder)
-IMG_DIR=/tmp/svacanas/${BATCH}
+IMG_DIR=/tmp/ingroup_images/${BATCH}
 mkdir -p ${IMG_DIR}
 
 if [ -f "${DATA_ROOT}/images.zip" ]; then
@@ -72,7 +72,7 @@ apptainer exec \
     --save-video
 
 # Clean up /tmp
-rm -rf /tmp/svacanas/${BATCH}
+rm -rf /tmp/ingroup_images/${BATCH}
 
 echo "Results saved to ${OUT_DIR}/vitpose_keypoints.json"
 

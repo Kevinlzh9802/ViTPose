@@ -133,6 +133,9 @@ def main():
     else:
         dataset_info = DatasetInfo(dataset_info)
 
+    # --- Temp video path (write locally, then move to avoid NFS corruption) ---
+    tmp_video_path = os.path.join('/tmp', 'vitpose_kp_tmp.mp4')
+
     # --- Video writer (lazy init on first frame) ---
     video_writer = None
 
@@ -208,7 +211,7 @@ def main():
                     h, w = vis_img.shape[:2]
                     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     video_writer = cv2.VideoWriter(
-                        out_video_path, fourcc, args.video_fps, (w, h))
+                        tmp_video_path, fourcc, args.video_fps, (w, h))
 
                 video_writer.write(vis_img)
 
@@ -216,7 +219,18 @@ def main():
         # Always finalise the video writer, even if inference crashes mid-run
         if video_writer is not None:
             video_writer.release()
-            print(f'Saved video to {out_video_path}')
+            # Re-encode with ffmpeg (H.264) for broad player compatibility
+            import subprocess
+            ret = subprocess.run(
+                ['ffmpeg', '-y', '-i', tmp_video_path,
+                 '-vcodec', 'libx264', '-pix_fmt', 'yuv420p',
+                 out_video_path],
+                capture_output=True)
+            os.remove(tmp_video_path)
+            if ret.returncode != 0:
+                print(f'ffmpeg re-encode failed:\n{ret.stderr.decode()}')
+            else:
+                print(f'Saved video to {out_video_path}')
 
     # --- Save output JSON ---
     output_data = {'annotations': output_annotations}
