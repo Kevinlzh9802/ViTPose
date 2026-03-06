@@ -25,7 +25,7 @@ Input JSON format (mask_bbox.json):
     where top-level keys in "annotations" are image_id strings,
     and keys inside "bbox" are person_id strings.
 
-Outputs (saved to <data-root>):
+Outputs (saved to <out-dir>, defaults to <data-root>):
     - vitpose_keypoints.json   (or custom name via --out-json)
     - vitpose_kp.mp4           (optional, enabled with --save-video)
 
@@ -79,7 +79,11 @@ def parse_args():
                              '(default: configs/ViTPose_coco_plus_conflab_w_bg_256x192.py)')
     parser.add_argument('pose_checkpoint', help='Checkpoint file for pose model')
     parser.add_argument('--data-root', required=True,
-                        help='Root folder containing images/ and mask_bbox.json')
+                        help='Root folder containing mask_bbox.json')
+    parser.add_argument('--img-dir', default=None,
+                        help='Folder containing images (default: <data-root>/images)')
+    parser.add_argument('--out-dir', default=None,
+                        help='Directory to write output files (default: same as --data-root)')
     parser.add_argument('--bbox-file', default='mask_bbox.json',
                         help='Name of the input bbox JSON (default: mask_bbox.json)')
     parser.add_argument('--out-json', default='vitpose_keypoints.json',
@@ -102,10 +106,13 @@ def parse_args():
 def main():
     args = parse_args()
 
-    img_dir = os.path.join(args.data_root, 'images')
+    out_dir = args.out_dir if args.out_dir is not None else args.data_root
+    os.makedirs(out_dir, exist_ok=True)
+
+    img_dir = args.img_dir if args.img_dir is not None else os.path.join(args.data_root, 'images')
     bbox_path = os.path.join(args.data_root, args.bbox_file)
-    out_json_path = os.path.join(args.data_root, args.out_json)
-    out_video_path = os.path.join(args.data_root, 'vitpose_kp.mp4')
+    out_json_path = os.path.join(out_dir, args.out_json)
+    out_video_path = os.path.join(out_dir, 'vitpose_kp.mp4')
 
     # --- Load bbox JSON ---
     with open(bbox_path, 'r') as f:
