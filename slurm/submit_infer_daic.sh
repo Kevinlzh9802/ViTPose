@@ -29,6 +29,11 @@ POSE_CKPT="${POSE_CKPT:-${NEON}/code/ViTPose/work_dirs/ViTPose_coco_plus_conflab
 BATCH="${BATCH:-cam06_batch01}"
 DATA_ROOT="${DATA_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/sam3_output/${BATCH}}"
 
+for i in $(seq 1 10); do
+    [[ -d "${DATA_ROOT}" ]] && break
+    echo "Waiting for NFS mount (attempt $i/10)..."
+    sleep 10
+done
 if [[ ! -d "${DATA_ROOT}" ]]; then
     echo "Error: DATA_ROOT not found: ${DATA_ROOT}" >&2
     exit 1
