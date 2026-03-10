@@ -219,18 +219,11 @@ def main():
         # Always finalise the video writer, even if inference crashes mid-run
         if video_writer is not None:
             video_writer.release()
-            # Re-encode with ffmpeg (H.264) for broad player compatibility
-            import subprocess
-            ret = subprocess.run(
-                ['ffmpeg', '-y', '-i', tmp_video_path,
-                 '-vcodec', 'libx264', '-pix_fmt', 'yuv420p',
-                 out_video_path],
-                capture_output=True)
+            # Keep the raw OpenCV mp4v output and copy it to out-dir.
+            import shutil
+            shutil.copyfile(tmp_video_path, out_video_path)
             os.remove(tmp_video_path)
-            if ret.returncode != 0:
-                print(f'ffmpeg re-encode failed:\n{ret.stderr.decode()}')
-            else:
-                print(f'Saved video to {out_video_path}')
+            print(f'Saved raw video to {out_video_path}')
 
     # --- Save output JSON ---
     output_data = {'annotations': output_annotations}
