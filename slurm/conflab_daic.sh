@@ -39,7 +39,7 @@ SIF="${SIF:-${NEON}/apptainer/vitpose-0.0.5.sif}"
 
 # Output written directly to home directory
 # OUT_DIR=/home/nfs/svacanas/outputs/vitpose/${BATCH}
-OUT_DIR=/tudelft.net/staff-umbrella/zonghuan/data/conflab/vitpose_outputs/${BATCH}
+OUT_DIR=${NEON}/zonghuan/data/conflab/vitpose_outputs/${BATCH}
 mkdir -p ${OUT_DIR}
 
 # Unzip images to /tmp — zip contains flat jpgs (no images/ subfolder)
