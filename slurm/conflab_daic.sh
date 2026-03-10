@@ -15,7 +15,7 @@ module use /opt/insy/modulefiles
 module load cuda/12.1
 
 NEON=/tudelft.net/staff-umbrella/neon
-VITPOSE_DIR=/home/nfs/zli33/ViTPose
+VITPOSE_DIR=/home/nfs/zli33/projects/ViTPose
 
 # ---------------------------------------------------------------------------
 # Checkpoint — override by setting POSE_CKPT before sbatch, e.g.:
