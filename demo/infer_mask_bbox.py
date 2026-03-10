@@ -25,7 +25,7 @@ Input JSON format (mask_bbox.json):
     where top-level keys in "annotations" are image_id strings,
     and keys inside "bbox" are person_id strings.
 
-Outputs (saved to <data-root>):
+Outputs (saved to <out-dir>, defaults to <data-root>):
     - vitpose_keypoints.json   (or custom name via --out-json)
     - vitpose_kp.mp4           (optional, enabled with --save-video)
 
@@ -79,7 +79,11 @@ def parse_args():
                              '(default: configs/ViTPose_coco_plus_conflab_w_bg_256x192.py)')
     parser.add_argument('pose_checkpoint', help='Checkpoint file for pose model')
     parser.add_argument('--data-root', required=True,
-                        help='Root folder containing images/ and mask_bbox.json')
+                        help='Root folder containing mask_bbox.json')
+    parser.add_argument('--img-dir', default=None,
+                        help='Folder containing images (default: <data-root>/images)')
+    parser.add_argument('--out-dir', default=None,
+                        help='Directory to write output files (default: same as --data-root)')
     parser.add_argument('--bbox-file', default='mask_bbox.json',
                         help='Name of the input bbox JSON (default: mask_bbox.json)')
     parser.add_argument('--out-json', default='vitpose_keypoints.json',
@@ -102,10 +106,13 @@ def parse_args():
 def main():
     args = parse_args()
 
-    img_dir = os.path.join(args.data_root, 'images')
+    out_dir = args.out_dir if args.out_dir is not None else args.data_root
+    os.makedirs(out_dir, exist_ok=True)
+
+    img_dir = args.img_dir if args.img_dir is not None else os.path.join(args.data_root, 'images')
     bbox_path = os.path.join(args.data_root, args.bbox_file)
-    out_json_path = os.path.join(args.data_root, args.out_json)
-    out_video_path = os.path.join(args.data_root, 'vitpose_kp.mp4')
+    out_json_path = os.path.join(out_dir, args.out_json)
+    out_video_path = os.path.join(out_dir, 'vitpose_kp.mp4')
 
     # --- Load bbox JSON ---
     with open(bbox_path, 'r') as f:
@@ -126,6 +133,9 @@ def main():
     else:
         dataset_info = DatasetInfo(dataset_info)
 
+    # --- Temp video path (write locally, then move to avoid NFS corruption) ---
+    tmp_video_path = os.path.join('/tmp', 'vitpose_kp_tmp.mp4')
+
     # --- Video writer (lazy init on first frame) ---
     video_writer = None
 
@@ -135,82 +145,98 @@ def main():
     # --- Inference loop ---
     output_annotations = {}
 
-    for image_id_str in tqdm(sorted_image_ids, desc='Inferring'):
-        image_id = int(image_id_str)
-        ann = annotations[image_id_str]
-        bbox_dict = ann['bbox']  # {person_id_str: [x, y, w, h], ...}
+    try:
+        for image_id_str in tqdm(sorted_image_ids, desc='Inferring'):
+            image_id = int(image_id_str)
+            ann = annotations[image_id_str]
+            bbox_dict = ann['bbox']  # {person_id_str: [x, y, w, h], ...}
 
-        # Resolve image path
-        img_path = os.path.join(img_dir, f'{image_id:08d}.jpg')
-        if not os.path.isfile(img_path):
-            print(f'[WARN] No image found at {img_path}, skipping.')
-            continue
+            # Resolve image path
+            img_path = os.path.join(img_dir, f'{image_id:08d}.jpg')
+            if not os.path.isfile(img_path):
+                print(f'[WARN] No image found at {img_path}, skipping.')
+                continue
 
-        # Build ordered person_results list, keeping track of person_ids
-        person_ids = list(bbox_dict.keys())
-        person_results = []
-        for pid in person_ids:
-            person_results.append({'bbox': np.array(bbox_dict[pid], dtype=np.float32)})
+            # Build ordered person_results list, keeping track of person_ids
+            person_ids = list(bbox_dict.keys())
+            person_results = []
+            for pid in person_ids:
+                person_results.append({'bbox': np.array(bbox_dict[pid], dtype=np.float32)})
 
-        # Run inference
-        if len(person_results) > 0:
-            pose_results, _ = inference_top_down_pose_model(
-                pose_model,
-                img_path,
-                person_results,
-                bbox_thr=None,
-                format='xywh',
-                dataset=dataset,
-                dataset_info=dataset_info,
-                return_heatmap=False,
-                outputs=None)
-        else:
-            pose_results = []
+            # Run inference
+            if len(person_results) > 0:
+                pose_results, _ = inference_top_down_pose_model(
+                    pose_model,
+                    img_path,
+                    person_results,
+                    bbox_thr=None,
+                    format='xywh',
+                    dataset=dataset,
+                    dataset_info=dataset_info,
+                    return_heatmap=False,
+                    outputs=None)
+            else:
+                pose_results = []
 
-        # Map results back to person_ids
-        keypoints_dict = {}
-        for pid, pose_res in zip(person_ids, pose_results):
-            # pose_res['keypoints'] is ndarray (K, 3): x, y, score
-            kps = pose_res['keypoints']
-            keypoints_dict[pid] = kps.tolist()
+            # Map results back to person_ids
+            keypoints_dict = {}
+            for pid, pose_res in zip(person_ids, pose_results):
+                # pose_res['keypoints'] is ndarray (K, 3): x, y, score
+                kps = pose_res['keypoints']
+                keypoints_dict[pid] = kps.tolist()
 
-        # Build output annotation
-        output_annotations[image_id_str] = {
-            'bbox': bbox_dict,
-            'keypoints': keypoints_dict,
-        }
+            # Build output annotation
+            output_annotations[image_id_str] = {
+                'bbox': bbox_dict,
+                'keypoints': keypoints_dict,
+            }
 
-        # --- Optional: render visualisation frame ---
-        if args.save_video and len(pose_results) > 0:
-            vis_img = vis_pose_result(
-                pose_model,
-                img_path,
-                pose_results,
-                dataset=dataset,
-                dataset_info=dataset_info,
-                kpt_score_thr=args.kpt_thr,
-                radius=args.radius,
-                thickness=args.thickness,
-                show=False)
+            # --- Optional: render visualisation frame ---
+            if args.save_video:
+                if len(pose_results) > 0:
+                    vis_img = vis_pose_result(
+                        pose_model,
+                        img_path,
+                        pose_results,
+                        dataset=dataset,
+                        dataset_info=dataset_info,
+                        kpt_score_thr=args.kpt_thr,
+                        radius=args.radius,
+                        thickness=args.thickness,
+                        show=False)
+                else:
+                    vis_img = cv2.imread(img_path)
 
-            if video_writer is None:
-                h, w = vis_img.shape[:2]
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                video_writer = cv2.VideoWriter(
-                    out_video_path, fourcc, args.video_fps, (w, h))
+                if video_writer is None:
+                    h, w = vis_img.shape[:2]
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    video_writer = cv2.VideoWriter(
+                        tmp_video_path, fourcc, args.video_fps, (w, h))
 
-            video_writer.write(vis_img)
+                video_writer.write(vis_img)
+
+    finally:
+        # Always finalise the video writer, even if inference crashes mid-run
+        if video_writer is not None:
+            video_writer.release()
+            # Re-encode with ffmpeg (H.264) for broad player compatibility
+            import subprocess
+            ret = subprocess.run(
+                ['ffmpeg', '-y', '-i', tmp_video_path,
+                 '-vcodec', 'libx264', '-pix_fmt', 'yuv420p',
+                 out_video_path],
+                capture_output=True)
+            os.remove(tmp_video_path)
+            if ret.returncode != 0:
+                print(f'ffmpeg re-encode failed:\n{ret.stderr.decode()}')
+            else:
+                print(f'Saved video to {out_video_path}')
 
     # --- Save output JSON ---
     output_data = {'annotations': output_annotations}
     with open(out_json_path, 'w') as f:
         json.dump(output_data, f)
     print(f'Saved keypoints to {out_json_path}')
-
-    # --- Finalise video ---
-    if video_writer is not None:
-        video_writer.release()
-        print(f'Saved video to {out_video_path}')
 
 
 if __name__ == '__main__':
