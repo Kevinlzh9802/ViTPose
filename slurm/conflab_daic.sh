@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=vitpose-infer
-#SBATCH --partition=general
+#SBATCH --partition=insy,general
 #SBATCH --qos=short
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
