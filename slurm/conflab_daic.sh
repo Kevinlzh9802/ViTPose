@@ -8,8 +8,8 @@
 #SBATCH --time=3:59:00
 #SBATCH --gres=gpu:1
 #SBATCH --mail-type=END     # Set mail type to 'END' to receive a mail when the job finishes. 
-#SBATCH --output=/home/nfs/zli33/slurm_outputs/infer_slurm_%j.out
-#SBATCH --error=/home/nfs/zli33/slurm_outputs/infer_slurm_%j.err
+#SBATCH --output=/home/nfs/zli33/slurm_outputs/vitpose-conflab/infer_slurm_%j.out
+#SBATCH --error=/home/nfs/zli33/slurm_outputs/vitpose-conflab/infer_slurm_%j.err
 
 module use /opt/insy/modulefiles
 module load cuda/12.1
