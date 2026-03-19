@@ -134,7 +134,8 @@ def main():
         dataset_info = DatasetInfo(dataset_info)
 
     # --- Temp video path (write locally, then move to avoid NFS corruption) ---
-    tmp_video_path = os.path.join('/tmp', 'vitpose_kp_tmp.mp4')
+    # Use PID to avoid collisions when multiple jobs share the same /tmp
+    tmp_video_path = os.path.join('/tmp', f'vitpose_kp_tmp_{os.getpid()}.mp4')
 
     # --- Video writer (lazy init on first frame) ---
     video_writer = None
