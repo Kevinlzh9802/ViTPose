@@ -119,6 +119,29 @@ def numeric_sort_key(value):
         return (1, str(value))
 
 
+def parse_camera_numbers(camera_numbers) -> set[str] | None:
+    """
+    Normalize camera number input into a zero-padded string set, e.g. {"06","08"}.
+    """
+    if camera_numbers is None:
+        return None
+
+    if isinstance(camera_numbers, str):
+        raw_values = [item.strip() for item in camera_numbers.split(",")]
+    else:
+        raw_values = [str(item).strip() for item in camera_numbers]
+
+    normalized = set()
+    for value in raw_values:
+        if not value:
+            continue
+        if value.lower().startswith("cam"):
+            value = value[3:]
+        normalized.add(value.zfill(2))
+
+    return normalized or None
+
+
 def orientation_from_pair(left_xy, right_xy) -> float | None:
     """Heading angle in the image plane from a left/right keypoint pair."""
     if left_xy is None or right_xy is None:
@@ -386,12 +409,14 @@ def process_results_directory(
     conf_thresh: float = CONF_THRESHOLD,
     camera_params_root: str | Path = CAMERA_PARAMS_ROOT,
     body_height: float = BODY_HEIGHT,
+    camera_numbers=None,
 ) -> None:
     """
     Walk every cam*/vitpose_keypoints.json under results_dir and write a
     dataframe alongside the input, or under output_dir/<cam_name>/.
     """
     results_dir = Path(results_dir)
+    selected_camera_numbers = parse_camera_numbers(camera_numbers)
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -404,6 +429,10 @@ def process_results_directory(
         cam_number = cam_number_from_name(cam_name)
         if cam_number is None:
             print(f"  Skipping {cam_name}: could not parse camera number")
+            continue
+        cam_number = str(cam_number).zfill(2)
+        if selected_camera_numbers is not None and cam_number not in selected_camera_numbers:
+            print(f"  Skipping {cam_name}: cam{cam_number} not in requested set")
             continue
 
         print(f"  Processing {json_file.relative_to(results_dir)}")
@@ -462,6 +491,11 @@ def parse_args():
         default=str(CAMERA_PARAMS_ROOT),
         help="Root containing camera_XX/intrinsic.json and extrinsic.json.",
     )
+    parser.add_argument(
+        "--camera_numbers",
+        default=None,
+        help="Optional comma-separated camera numbers to process, e.g. '06,08,10'.",
+    )
     return parser.parse_args()
 
 
@@ -474,4 +508,5 @@ if __name__ == "__main__":
         conf_thresh=args.conf_thresh,
         camera_params_root=args.camera_params_root,
         body_height=args.body_height,
+        camera_numbers=args.camera_numbers,
     )

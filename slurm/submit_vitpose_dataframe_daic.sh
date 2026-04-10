@@ -22,6 +22,23 @@ RESULTS_ROOT="${RESULTS_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/vitpose_result
 OUTPUT_ROOT="${OUTPUT_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/vitpose_dataframe}"
 
 CAMERA_PARAMS_ROOT="${CAMERA_PARAMS_ROOT:-${NEON}/ingroup_dataset/processed_data/gopro_data/camera_calibration/camera_params}"
+CAMERA_NUMBERS="${CAMERA_NUMBERS:-}"
+
+for arg in "$@"; do
+    case "$arg" in
+        --cam=*)
+            CAMERA_NUMBERS="${arg#--cam=}"
+            ;;
+        --camera_numbers=*)
+            CAMERA_NUMBERS="${arg#--camera_numbers=}"
+            ;;
+        *)
+            echo "Error: unknown argument '$arg'" >&2
+            echo "Usage: sbatch $0 [--cam=06,08,10]" >&2
+            exit 1
+            ;;
+    esac
+done
 
 if [[ ! -d "${RESULTS_ROOT}" ]]; then
     echo "Error: RESULTS_ROOT not found: ${RESULTS_ROOT}" >&2
@@ -38,6 +55,20 @@ echo "Submitting ViTPose dataframe conversion"
 echo "  results_root=${RESULTS_ROOT}"
 echo "  output_root=${OUTPUT_ROOT}"
 echo "  camera_params_root=${CAMERA_PARAMS_ROOT}"
+if [[ -n "${CAMERA_NUMBERS}" ]]; then
+    echo "  camera_numbers=${CAMERA_NUMBERS}"
+fi
+
+python_args=(
+    "${RESULTS_ROOT}"
+    --output_dir "${OUTPUT_ROOT}"
+    --output_name vitpose_dataframe.pkl
+    --camera_params_root "${CAMERA_PARAMS_ROOT}"
+)
+
+if [[ -n "${CAMERA_NUMBERS}" ]]; then
+    python_args+=(--camera_numbers "${CAMERA_NUMBERS}")
+fi
 
 apptainer exec \
     --containall \
@@ -46,10 +77,7 @@ apptainer exec \
     -B /tudelft.net/:/tudelft.net/ \
     ${SIF} \
     python ${VITPOSE_DIR}/demo/vitpose_to_dataframe.py \
-    "${RESULTS_ROOT}" \
-    --output_dir "${OUTPUT_ROOT}" \
-    --output_name vitpose_dataframe.pkl \
-    --camera_params_root "${CAMERA_PARAMS_ROOT}"
+    "${python_args[@]}"
 
 echo "Dataframes written under ${OUTPUT_ROOT}"
 
@@ -67,4 +95,7 @@ echo "Dataframes written under ${OUTPUT_ROOT}"
 # 3) Override camera params root:
 #    CAMERA_PARAMS_ROOT=/path/to/camera_params \
 #    sbatch slurm/submit_vitpose_dataframe_daic.sh
+# 
+# 4) Only process specific cameras:
+#    sbatch slurm/submit_vitpose_dataframe_daic.sh --cam=06,08,10
 # ---------------------------------------------------------------------------
