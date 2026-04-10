@@ -36,10 +36,13 @@ row represents one timestamp/frame and contains:
 Each spaceFeat entry is an (n_people, 4) object array containing:
     [person_id, x, y, orientation]
 
-At this stage x/y are image-plane coordinates derived directly from the 2D
-keypoints. When camera intrinsics/extrinsics are available, this script can be
-updated to swap those values for calibrated world coordinates while preserving
-the same dataframe contract.
+The saved x/y values are world-floor coordinates obtained by back-projecting
+the 2D keypoints with per-camera intrinsic/extrinsic calibration loaded from:
+
+    <camera_params_root>/
+        camera_XX/
+            intrinsic.json
+            extrinsic.json
 """
 
 from __future__ import annotations
@@ -49,11 +52,38 @@ import json
 import math
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 
 
+BODY_HEIGHT = 1.7
 CONF_THRESHOLD = 0.0
+CAMERA_PARAMS_ROOT = Path(
+    "/tudelft.net/staff-umbrella/neon/ingroup_dataset/processed_data/"
+    "gopro_data/camera_calibration/camera_params"
+)
+
+# COCO-17 keypoint heights as a fraction of body height above the floor.
+KP_HEIGHT_RATIOS = np.array([
+    0.95,   #  0 nose
+    0.97,   #  1 left_eye
+    0.97,   #  2 right_eye
+    0.95,   #  3 left_ear
+    0.95,   #  4 right_ear
+    0.85,   #  5 left_shoulder
+    0.85,   #  6 right_shoulder
+    0.68,   #  7 left_elbow
+    0.68,   #  8 right_elbow
+    0.55,   #  9 left_wrist
+    0.55,   # 10 right_wrist
+    0.50,   # 11 left_hip
+    0.50,   # 12 right_hip
+    0.27,   # 13 left_knee
+    0.27,   # 14 right_knee
+    0.02,   # 15 left_ankle
+    0.02,   # 16 right_ankle
+], dtype=np.float64)
 
 # Orientation pairs: (left_idx, right_idx)
 ORIENTATION_PAIRS = {
@@ -70,6 +100,8 @@ SEGMENT_FALLBACKS = {
     "hip": [11, 12],
     "foot": [15, 16],
 }
+
+_camera_params_cache: dict[tuple[str, str], dict] = {}
 
 
 def cam_number_from_name(cam_name: str) -> str | None:
@@ -101,17 +133,85 @@ def orientation_from_pair(left_xy, right_xy) -> float | None:
     return math.atan2(dx, -dy)
 
 
-def valid_xy(raw_kps: list, kp_idx: int, conf_thresh: float) -> tuple[float, float] | None:
-    """Return (x, y) for a keypoint if it passes the confidence threshold."""
-    kp = raw_kps[kp_idx]
-    if kp[2] < conf_thresh:
+def normalize_distortion_coefficients(coeffs) -> np.ndarray:
+    """
+    Convert a short distortion vector into an OpenCV-compatible array.
+
+    The provided JSON examples use [k1, k2, k3]. OpenCV's pinhole model expects
+    [k1, k2, p1, p2, k3], so tangential terms are padded with zeros.
+    """
+    dist = np.asarray(coeffs, dtype=np.float64).reshape(-1)
+    if dist.size == 3:
+        dist = np.array([dist[0], dist[1], 0.0, 0.0, dist[2]], dtype=np.float64)
+    elif dist.size not in {4, 5, 8, 12, 14}:
+        raise ValueError("Unsupported distortion coefficient length: {}".format(dist.size))
+    return dist
+
+
+def load_camera_params(
+    cam_number: str | int,
+    camera_params_root: str | Path = CAMERA_PARAMS_ROOT,
+) -> dict:
+    """Load per-camera intrinsics and extrinsics from camera_XX/*.json."""
+    cam_id = str(cam_number).zfill(2)
+    cache_key = (str(Path(camera_params_root)), cam_id)
+    if cache_key in _camera_params_cache:
+        return _camera_params_cache[cache_key]
+
+    camera_dir = Path(camera_params_root) / f"camera_{cam_id}"
+    intrinsic_path = camera_dir / "intrinsic.json"
+    extrinsic_path = camera_dir / "extrinsic.json"
+
+    with open(intrinsic_path) as f:
+        intrinsic_data = json.load(f)
+    with open(extrinsic_path) as f:
+        extrinsic_data = json.load(f)
+
+    params = {
+        "K": np.asarray(intrinsic_data["intrinsic"], dtype=np.float64),
+        "D": normalize_distortion_coefficients(intrinsic_data["distortion_coefficients"]),
+        "rvec": np.asarray(extrinsic_data["rvec"], dtype=np.float64).reshape(3, 1),
+        "tvec": np.asarray(extrinsic_data["tvec"], dtype=np.float64).reshape(3, 1),
+    }
+    _camera_params_cache[cache_key] = params
+    return params
+
+
+def undistort_points(pts_uv: np.ndarray, K: np.ndarray, D: np.ndarray) -> np.ndarray:
+    """Undistort pixel coordinates into normalized camera coordinates."""
+    pts = pts_uv.reshape(-1, 1, 2).astype(np.float64)
+    undistorted = cv2.undistortPoints(pts, K, D)
+    return undistorted.reshape(-1, 2)
+
+
+def backproject_to_world(xn: float, yn: float, z_kp: float, R: np.ndarray, tvec: np.ndarray) -> tuple[float | None, float | None]:
+    """
+    Back-project normalized image coordinates to world-floor X/Y at a known Z.
+    """
+    camera_center_world = -(R.T @ tvec.reshape(3))
+    ray_cam = np.array([xn, yn, 1.0], dtype=np.float64)
+    ray_world = R.T @ ray_cam
+
+    if abs(ray_world[2]) < 1e-9:
+        return None, None
+
+    t = (z_kp - camera_center_world[2]) / ray_world[2]
+    x_world = float(camera_center_world[0] + t * ray_world[0])
+    y_world = float(camera_center_world[1] + t * ray_world[1])
+    return x_world, y_world
+
+
+def valid_world_xy(kp_world: list, kp_idx: int) -> tuple[float, float] | None:
+    """Return (x, y) for a world keypoint if available."""
+    kp = kp_world[kp_idx]
+    if kp is None:
         return None
     return float(kp[0]), float(kp[1])
 
 
-def segment_xy_and_orientation(raw_kps: list, segment_name: str, conf_thresh: float) -> tuple[float, float, float]:
+def segment_xy_and_orientation(kp_world: list, segment_name: str) -> tuple[float, float, float]:
     """
-    Build an image-plane proxy for a segment.
+    Build a world-plane segment descriptor from projected keypoints.
 
     x/y use the midpoint of the left/right pair when both are visible. When the
     pair is incomplete, the position falls back to the mean of visible fallback
@@ -119,8 +219,8 @@ def segment_xy_and_orientation(raw_kps: list, segment_name: str, conf_thresh: fl
     visible; otherwise NaN is stored.
     """
     left_idx, right_idx = ORIENTATION_PAIRS[segment_name]
-    left_xy = valid_xy(raw_kps, left_idx, conf_thresh)
-    right_xy = valid_xy(raw_kps, right_idx, conf_thresh)
+    left_xy = valid_world_xy(kp_world, left_idx)
+    right_xy = valid_world_xy(kp_world, right_idx)
 
     if left_xy is not None and right_xy is not None:
         x = (left_xy[0] + right_xy[0]) / 2.0
@@ -130,7 +230,7 @@ def segment_xy_and_orientation(raw_kps: list, segment_name: str, conf_thresh: fl
 
     fallback_points = []
     for kp_idx in SEGMENT_FALLBACKS[segment_name]:
-        xy = valid_xy(raw_kps, kp_idx, conf_thresh)
+        xy = valid_world_xy(kp_world, kp_idx)
         if xy is not None:
             fallback_points.append(xy)
 
@@ -142,24 +242,77 @@ def segment_xy_and_orientation(raw_kps: list, segment_name: str, conf_thresh: fl
     return math.nan, math.nan, math.nan
 
 
-def process_person_keypoints(raw_kps: list, person_id: str, conf_thresh: float = CONF_THRESHOLD) -> dict[str, list]:
+def project_person_keypoints_to_world(
+    raw_kps: list,
+    K: np.ndarray,
+    D: np.ndarray,
+    R: np.ndarray,
+    tvec: np.ndarray,
+    body_height: float,
+    conf_thresh: float,
+) -> list:
+    """Project one person's 17 COCO keypoints to world coordinates."""
+    if len(raw_kps) != 17:
+        raise ValueError("Expected 17 COCO keypoints, got {}".format(len(raw_kps)))
+
+    valid_idx = [i for i in range(17) if raw_kps[i][2] >= conf_thresh]
+    kp_world = [None] * 17
+    if not valid_idx:
+        return kp_world
+
+    pts_uv = np.array([[raw_kps[i][0], raw_kps[i][1]] for i in valid_idx], dtype=np.float64)
+    norm_xy = undistort_points(pts_uv, K, D)
+
+    for j, kp_idx in enumerate(valid_idx):
+        z_kp = body_height * KP_HEIGHT_RATIOS[kp_idx]
+        xn, yn = norm_xy[j]
+        xw, yw = backproject_to_world(xn, yn, z_kp, R, tvec)
+        if xw is not None and yw is not None:
+            kp_world[kp_idx] = (xw, yw, z_kp)
+
+    return kp_world
+
+
+def process_person_keypoints(
+    raw_kps: list,
+    person_id: str,
+    K: np.ndarray,
+    D: np.ndarray,
+    R: np.ndarray,
+    tvec: np.ndarray,
+    body_height: float = BODY_HEIGHT,
+    conf_thresh: float = CONF_THRESHOLD,
+) -> dict[str, list]:
     """
     Convert one person's 17 COCO keypoints into DANTE-style segment rows.
 
     Returns a dict mapping each segment name to:
         [person_id, x, y, orientation]
     """
-    if len(raw_kps) != 17:
-        raise ValueError("Expected 17 COCO keypoints, got {}".format(len(raw_kps)))
+    kp_world = project_person_keypoints_to_world(
+        raw_kps,
+        K=K,
+        D=D,
+        R=R,
+        tvec=tvec,
+        body_height=body_height,
+        conf_thresh=conf_thresh,
+    )
 
     segment_rows = {}
     for segment_name in ORIENTATION_PAIRS:
-        x, y, theta = segment_xy_and_orientation(raw_kps, segment_name, conf_thresh)
+        x, y, theta = segment_xy_and_orientation(kp_world, segment_name)
         segment_rows[segment_name] = [str(person_id), x, y, theta]
     return segment_rows
 
 
-def process_vitpose_json(input_path: str | Path, conf_thresh: float = CONF_THRESHOLD) -> pd.DataFrame:
+def process_vitpose_json(
+    input_path: str | Path,
+    cam_number: str | int,
+    camera_params_root: str | Path = CAMERA_PARAMS_ROOT,
+    body_height: float = BODY_HEIGHT,
+    conf_thresh: float = CONF_THRESHOLD,
+) -> pd.DataFrame:
     """
     Process a single vitpose_keypoints.json into a dataframe indexed by frame id.
 
@@ -173,6 +326,13 @@ def process_vitpose_json(input_path: str | Path, conf_thresh: float = CONF_THRES
     with open(input_path) as f:
         data = json.load(f)
 
+    camera_params = load_camera_params(cam_number, camera_params_root=camera_params_root)
+    K = camera_params["K"]
+    D = camera_params["D"]
+    rvec = camera_params["rvec"]
+    tvec = camera_params["tvec"]
+    R, _ = cv2.Rodrigues(rvec)
+
     records = []
     annotations = data.get("annotations", {})
     for frame_id in sorted(annotations.keys(), key=numeric_sort_key):
@@ -185,6 +345,11 @@ def process_vitpose_json(input_path: str | Path, conf_thresh: float = CONF_THRES
             person_segments = process_person_keypoints(
                 keypoints_by_track[track_id],
                 person_id=str(track_id),
+                K=K,
+                D=D,
+                R=R,
+                tvec=tvec,
+                body_height=body_height,
                 conf_thresh=conf_thresh,
             )
             for segment_name, row in person_segments.items():
@@ -219,8 +384,8 @@ def process_results_directory(
     output_dir: str | Path | None = None,
     output_name: str = "vitpose_dataframe.pkl",
     conf_thresh: float = CONF_THRESHOLD,
-    intrinsics_dir: str | Path | None = None,
-    extrinsics_dir: str | Path | None = None,
+    camera_params_root: str | Path = CAMERA_PARAMS_ROOT,
+    body_height: float = BODY_HEIGHT,
 ) -> None:
     """
     Walk every cam*/vitpose_keypoints.json under results_dir and write a
@@ -230,13 +395,6 @@ def process_results_directory(
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-
-    if intrinsics_dir is not None or extrinsics_dir is not None:
-        print("Calibration directories were provided but are not used yet; exporting image-plane x/y coordinates.")
-        if intrinsics_dir is not None:
-            print(f"  intrinsics_dir={intrinsics_dir}")
-        if extrinsics_dir is not None:
-            print(f"  extrinsics_dir={extrinsics_dir}")
 
     json_files = sorted(results_dir.glob("*/vitpose_keypoints.json"))
     print(f"Found {len(json_files)} result files under {results_dir}")
@@ -249,7 +407,13 @@ def process_results_directory(
             continue
 
         print(f"  Processing {json_file.relative_to(results_dir)}")
-        df = process_vitpose_json(json_file, conf_thresh=conf_thresh)
+        df = process_vitpose_json(
+            json_file,
+            cam_number=cam_number,
+            camera_params_root=camera_params_root,
+            body_height=body_height,
+            conf_thresh=conf_thresh,
+        )
 
         if output_dir is not None:
             out_path = output_dir / cam_name / output_name
@@ -285,17 +449,18 @@ def parse_args():
         "--conf_thresh",
         type=float,
         default=CONF_THRESHOLD,
-        help="Minimum keypoint confidence used when building segment positions.",
+        help="Minimum keypoint confidence used when projecting keypoints.",
     )
     parser.add_argument(
-        "--intrinsics_dir",
-        default=None,
-        help="Reserved for future calibrated conversion. Currently unused.",
+        "--body_height",
+        type=float,
+        default=BODY_HEIGHT,
+        help="Assumed body height in meters for back-projection.",
     )
     parser.add_argument(
-        "--extrinsics_dir",
-        default=None,
-        help="Reserved for future calibrated conversion. Currently unused.",
+        "--camera_params_root",
+        default=str(CAMERA_PARAMS_ROOT),
+        help="Root containing camera_XX/intrinsic.json and extrinsic.json.",
     )
     return parser.parse_args()
 
@@ -307,6 +472,6 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         output_name=args.output_name,
         conf_thresh=args.conf_thresh,
-        intrinsics_dir=args.intrinsics_dir,
-        extrinsics_dir=args.extrinsics_dir,
+        camera_params_root=args.camera_params_root,
+        body_height=args.body_height,
     )

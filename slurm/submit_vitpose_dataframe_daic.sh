@@ -20,9 +20,7 @@ SIF="${SIF:-${NEON}/apptainer/vitpose-0.0.5.sif}"
 RESULTS_ROOT="${RESULTS_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/vitpose_results}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/vitpose_dataframe}"
 
-CALIB_ROOT="${CALIB_ROOT:-${NEON}/ingroup_dataset/processed_data/gopro_data/camera_calibration}"
-INTRINSICS_DIR="${INTRINSICS_DIR:-${CALIB_ROOT}/intrinsics}"
-EXTRINSICS_DIR="${EXTRINSICS_DIR:-${CALIB_ROOT}/extrinsics}"
+CAMERA_PARAMS_ROOT="${CAMERA_PARAMS_ROOT:-${NEON}/ingroup_dataset/processed_data/gopro_data/camera_calibration/camera_params}"
 
 if [[ ! -d "${RESULTS_ROOT}" ]]; then
     echo "Error: RESULTS_ROOT not found: ${RESULTS_ROOT}" >&2
@@ -31,19 +29,14 @@ fi
 
 mkdir -p "${OUTPUT_ROOT}"
 
-if [[ ! -d "${INTRINSICS_DIR}" ]]; then
-    echo "Warning: INTRINSICS_DIR not found: ${INTRINSICS_DIR}" >&2
-fi
-
-if [[ ! -d "${EXTRINSICS_DIR}" ]]; then
-    echo "Warning: EXTRINSICS_DIR not found: ${EXTRINSICS_DIR}" >&2
+if [[ ! -d "${CAMERA_PARAMS_ROOT}" ]]; then
+    echo "Warning: CAMERA_PARAMS_ROOT not found: ${CAMERA_PARAMS_ROOT}" >&2
 fi
 
 echo "Submitting ViTPose dataframe conversion"
 echo "  results_root=${RESULTS_ROOT}"
 echo "  output_root=${OUTPUT_ROOT}"
-echo "  intrinsics_dir=${INTRINSICS_DIR}"
-echo "  extrinsics_dir=${EXTRINSICS_DIR}"
+echo "  camera_params_root=${CAMERA_PARAMS_ROOT}"
 
 apptainer exec \
     --containall \
@@ -55,8 +48,7 @@ apptainer exec \
     "${RESULTS_ROOT}" \
     --output_dir "${OUTPUT_ROOT}" \
     --output_name vitpose_dataframe.pkl \
-    --intrinsics_dir "${INTRINSICS_DIR}" \
-    --extrinsics_dir "${EXTRINSICS_DIR}"
+    --camera_params_root "${CAMERA_PARAMS_ROOT}"
 
 echo "Dataframes written under ${OUTPUT_ROOT}"
 
@@ -71,8 +63,7 @@ echo "Dataframes written under ${OUTPUT_ROOT}"
 #    OUTPUT_ROOT=/path/to/B2_pipeline/vitpose_dataframe \
 #    sbatch slurm/submit_vitpose_dataframe_daic.sh
 #
-# 3) Override calibration directories:
-#    INTRINSICS_DIR=/path/to/intrinsics \
-#    EXTRINSICS_DIR=/path/to/extrinsics \
+# 3) Override camera params root:
+#    CAMERA_PARAMS_ROOT=/path/to/camera_params \
 #    sbatch slurm/submit_vitpose_dataframe_daic.sh
 # ---------------------------------------------------------------------------
