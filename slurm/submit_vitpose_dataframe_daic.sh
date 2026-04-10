@@ -6,8 +6,9 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=0:59:00
-#SBATCH --output=vitpose_dataframe_%j.out
-#SBATCH --error=vitpose_dataframe_%j.err
+#SBATCH --mail-type=END     # Set mail type to 'END' to receive a mail when the job finishes. 
+#SBATCH --output=/home/nfs/zli33/slurm_outputs/vitpose-ingroup/infer_slurm_%j.out
+#SBATCH --error=/home/nfs/zli33/slurm_outputs/vitpose-ingroup/infer_slurm_%j.err
 
 set -euo pipefail
 
