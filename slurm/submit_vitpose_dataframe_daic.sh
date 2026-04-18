@@ -23,6 +23,8 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/vitpose_datafram
 
 CAMERA_PARAMS_ROOT="${CAMERA_PARAMS_ROOT:-${NEON}/ingroup_dataset/processed_data/gopro_data/camera_calibration/camera_params}"
 CAMERA_NUMBERS="${CAMERA_NUMBERS:-}"
+GT_GROUPS_ROOT="${GT_GROUPS_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/cgroup_annotation}"
+PLOT_DIR="${PLOT_DIR:-${NEON}/ingroup_dataset/B2_pipeline/person_plotting}"
 
 for arg in "$@"; do
     case "$arg" in
@@ -31,6 +33,12 @@ for arg in "$@"; do
             ;;
         --camera_numbers=*)
             CAMERA_NUMBERS="${arg#--camera_numbers=}"
+            ;;
+        --gt_groups_root=*)
+            GT_GROUPS_ROOT="${arg#--gt_groups_root=}"
+            ;;
+        --plot_dir=*)
+            PLOT_DIR="${arg#--plot_dir=}"
             ;;
         *)
             echo "Error: unknown argument '$arg'" >&2
@@ -55,6 +63,8 @@ echo "Submitting ViTPose dataframe conversion"
 echo "  results_root=${RESULTS_ROOT}"
 echo "  output_root=${OUTPUT_ROOT}"
 echo "  camera_params_root=${CAMERA_PARAMS_ROOT}"
+echo "  gt_groups_root=${GT_GROUPS_ROOT}"
+echo "  plot_dir=${PLOT_DIR}"
 if [[ -n "${CAMERA_NUMBERS}" ]]; then
     echo "  camera_numbers=${CAMERA_NUMBERS}"
 fi
@@ -64,6 +74,8 @@ python_args=(
     --output_dir "${OUTPUT_ROOT}"
     --output_name vitpose_dataframe.pkl
     --camera_params_root "${CAMERA_PARAMS_ROOT}"
+    --gt_groups_root "${GT_GROUPS_ROOT}"
+    --plot_dir "${PLOT_DIR}"
 )
 
 if [[ -n "${CAMERA_NUMBERS}" ]]; then

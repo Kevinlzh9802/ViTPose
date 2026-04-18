@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 
 import cv2
@@ -100,6 +101,91 @@ SEGMENT_FALLBACKS = {
     "hip": [11, 12],
     "foot": [15, 16],
 }
+
+# --- Time-mapping and GT-group constants --------------------------------- #
+FPS = 60
+FRAMES_PER_BATCH = 18000  # 60 fps × 300 s = 5 min per batch
+
+
+def batch_number_from_name(cam_name: str) -> int | None:
+    """Extract 1-based batch number, e.g. 'cam06_batch03' -> 3."""
+    match = re.search(r"batch(\d+)", cam_name)
+    return int(match.group(1)) if match else None
+
+
+def _camera_start_seconds(cam_number: str) -> int | None:
+    """Seconds since midnight for the first frame of a camera's batch-1."""
+    num = int(cam_number)
+    if 6 <= num <= 10:
+        return 13 * 3600 + 45 * 60  # 13:45:00
+    elif 1 <= num <= 5:
+        return 14 * 3600 + 52 * 60  # 14:52:00
+    return None
+
+
+def _frame_to_time_str(
+    cam_number: str,
+    batch_number: int,
+    frame_index: int,
+    fps: int = FPS,
+) -> str:
+    """Map a frame index within a batch to an absolute 'HH:MM:SS;FF' string."""
+    start = _camera_start_seconds(cam_number)
+    if start is None:
+        return ""
+    total_frame = start * fps + (batch_number - 1) * FRAMES_PER_BATCH + frame_index
+    ff = total_frame % fps
+    total_secs = total_frame // fps
+    hh = total_secs // 3600
+    mm = (total_secs % 3600) // 60
+    ss = total_secs % 60
+    return f"{hh:02d}:{mm:02d}:{ss:02d};{ff:02d}"
+
+
+def _normalize_time_key(raw: str) -> str:
+    """Normalize 'HH:MM:SS;FF' so the FF field is always two digits."""
+    raw = raw.strip()
+    if ";" in raw:
+        base, ff = raw.rsplit(";", 1)
+        return f"{base};{int(ff):02d}"
+    return raw
+
+
+def _load_gt_groups(csv_path: str | Path) -> dict[str, str]:
+    """Read a GT groups CSV and return {normalized_time_str: raw_groups_str}."""
+    csv_path = Path(csv_path)
+    if not csv_path.is_file():
+        print(f"  Warning: GT groups CSV not found: {csv_path}")
+        return {}
+    df_csv = pd.read_csv(csv_path)
+    gt_map: dict[str, str] = {}
+    for _, row in df_csv.iterrows():
+        t = _normalize_time_key(str(row["time_association"]))
+        g = str(row["conversational_groups"]).strip()
+        gt_map[t] = g
+    return gt_map
+
+
+def _parse_groups_string(groups_str: str) -> list[set[int]]:
+    """Parse '{1,2} {3,4,5,6}' into [set(1,2), set(3,4,5,6)]."""
+    if not groups_str or groups_str.lower() == "nan":
+        return []
+    result: list[set[int]] = []
+    for m in re.finditer(r"\{([^}]+)\}", groups_str):
+        members = {int(x.strip()) for x in m.group(1).split(",")}
+        result.append(members)
+    return result
+
+
+def _gt_csv_name_for_camera(cam_number: str) -> str | None:
+    """Return the expected GT CSV filename for a camera, or None."""
+    num = int(cam_number)
+    if 6 <= num <= 10:
+        return "mingle_1_groups.csv"
+    elif 1 <= num <= 5:
+        return "mingle_2_groups.csv"
+    return None
+
 
 _camera_params_cache: dict[tuple[str, str], dict] = {}
 
@@ -335,14 +421,17 @@ def process_vitpose_json(
     camera_params_root: str | Path = CAMERA_PARAMS_ROOT,
     body_height: float = BODY_HEIGHT,
     conf_thresh: float = CONF_THRESHOLD,
+    batch_number: int | None = None,
+    gt_groups: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """
     Process a single vitpose_keypoints.json into a dataframe indexed by frame id.
 
     Columns:
         - timestamp
+        - time        (HH:MM:SS;FF wall-clock time, empty if batch info unavailable)
         - spaceFeat
-        - groups
+        - groups      (list of sets from GT CSV, empty if time not in CSV)
         - group_ids
     """
     input_path = Path(input_path)
@@ -385,11 +474,28 @@ def process_vitpose_json(
             else:
                 spacefeat[segment_name] = np.empty((0, 4), dtype=object)
 
+        # Compute wall-clock time and look up GT groups
+        time_str = ""
+        gt_group: list[set[int]] = []
+        if batch_number is not None:
+            try:
+                fidx = int(frame_id)
+            except (ValueError, TypeError):
+                fidx = None
+            if fidx is not None:
+                time_str = _frame_to_time_str(
+                    str(cam_number).zfill(2), batch_number, fidx
+                )
+                if time_str and gt_groups:
+                    raw = gt_groups.get(time_str, "")
+                    gt_group = _parse_groups_string(raw)
+
         records.append(
             {
                 "timestamp": str(frame_id),
+                "time": time_str,
                 "spaceFeat": spacefeat,
-                "groups": [],
+                "groups": gt_group,
                 "group_ids": [],
             }
         )
@@ -410,6 +516,8 @@ def process_results_directory(
     camera_params_root: str | Path = CAMERA_PARAMS_ROOT,
     body_height: float = BODY_HEIGHT,
     camera_numbers=None,
+    gt_groups_root: str | Path | None = None,
+    plot_dir: str | Path | None = None,
 ) -> None:
     """
     Walk every cam*/vitpose_keypoints.json under results_dir and write a
@@ -420,6 +528,11 @@ def process_results_directory(
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-load GT group CSVs keyed by csv filename
+    _gt_csv_cache: dict[str, dict[str, str]] = {}
+    if gt_groups_root is not None:
+        gt_groups_root = Path(gt_groups_root)
 
     json_files = sorted(results_dir.glob("*/vitpose_keypoints.json"))
     print(f"Found {len(json_files)} result files under {results_dir}")
@@ -435,6 +548,19 @@ def process_results_directory(
             print(f"  Skipping {cam_name}: cam{cam_number} not in requested set")
             continue
 
+        batch_num = batch_number_from_name(cam_name)
+
+        # Load GT groups CSV for this camera (cached per csv file)
+        gt_groups: dict[str, str] | None = None
+        if gt_groups_root is not None:
+            csv_name = _gt_csv_name_for_camera(cam_number)
+            if csv_name is not None:
+                if csv_name not in _gt_csv_cache:
+                    _gt_csv_cache[csv_name] = _load_gt_groups(
+                        gt_groups_root / csv_name
+                    )
+                gt_groups = _gt_csv_cache[csv_name]
+
         print(f"  Processing {json_file.relative_to(results_dir)}")
         df = process_vitpose_json(
             json_file,
@@ -442,6 +568,8 @@ def process_results_directory(
             camera_params_root=camera_params_root,
             body_height=body_height,
             conf_thresh=conf_thresh,
+            batch_number=batch_num,
+            gt_groups=gt_groups,
         )
 
         if output_dir is not None:
@@ -452,6 +580,18 @@ def process_results_directory(
 
         df.to_pickle(out_path)
         print(f"    -> {out_path}")
+
+        # Plot position/orientation every 60 seconds (3600 frames at 60 fps)
+        if plot_dir is not None:
+            from demo.plot_person import plot_dataframe_positions
+
+            cam_plot_dir = Path(plot_dir) / cam_name
+            plot_dataframe_positions(
+                df,
+                source_tag=cam_name,
+                output_dir=cam_plot_dir,
+                frame_interval=FPS * 60,  # every 60 seconds
+            )
 
 
 def parse_args():
@@ -496,6 +636,24 @@ def parse_args():
         default=None,
         help="Optional comma-separated camera numbers to process, e.g. '06,08,10'.",
     )
+    parser.add_argument(
+        "--gt_groups_root",
+        default=None,
+        help=(
+            "Directory containing mingle_1_groups.csv (cam 6-10) and/or "
+            "mingle_2_groups.csv (cam 1-5) with GT conversational groups. "
+            "Default on DAIC: /tudelft.net/staff-umbrella/neon/ingroup_dataset/"
+            "B2_pipeline/cgroup_annotation/"
+        ),
+    )
+    parser.add_argument(
+        "--plot_dir",
+        default=None,
+        help=(
+            "Optional directory for position/orientation plots. "
+            "If set, plots are written every 60 seconds per camera."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -509,4 +667,6 @@ if __name__ == "__main__":
         camera_params_root=args.camera_params_root,
         body_height=args.body_height,
         camera_numbers=args.camera_numbers,
+        gt_groups_root=args.gt_groups_root,
+        plot_dir=args.plot_dir,
     )
