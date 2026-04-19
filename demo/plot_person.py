@@ -56,10 +56,11 @@ import pandas as pd
 
 DEFAULT_SEGMENT = "hip"
 DEFAULT_FRAME_INTERVAL = 1200
-CIRCLE_RADIUS_M = 0.2
-ARROW_LENGTH_M = 0.6
-ARROW_HEAD_WIDTH_M = 0.15
-ARROW_HEAD_LENGTH_M = 0.2
+# 8 cm diameter circle per person (4 cm radius). Arrows are scaled to match.
+CIRCLE_RADIUS_M = 0.04
+ARROW_LENGTH_M = 0.12
+ARROW_HEAD_WIDTH_M = 0.03
+ARROW_HEAD_LENGTH_M = 0.04
 PLOT_PADDING_M = 1.5
 
 SEGMENT_ORDER = ("head", "shoulder", "hip", "foot")
@@ -202,6 +203,8 @@ def plot_single_frame(
     dpi: int = 100,
     groups: list[set[int]] | None = None,
     time_str: str = "",
+    out_path: Path | None = None,
+    title_override: str | None = None,
 ) -> Path | None:
     """Render a single frame and return the output path (or None if empty).
 
@@ -339,16 +342,240 @@ def plot_single_frame(
     ax.grid(True, linestyle=":", alpha=0.5)
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
-    time_part = f"  |  {time_str}" if time_str else ""
-    ax.set_title(
-        f"{source_tag}  |  frame {frame_id}{time_part}  |  anchor={anchor_segment}  |  n={len(anchor_people)}"
+    if title_override is not None:
+        ax.set_title(title_override)
+    else:
+        time_part = f"  |  {time_str}" if time_str else ""
+        ax.set_title(
+            f"{source_tag}  |  frame {frame_id}{time_part}  |  anchor={anchor_segment}  |  n={len(anchor_people)}"
+        )
+
+    if out_path is None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe_tag = _sanitize(source_tag)
+        safe_frame = _sanitize(frame_id)
+        out_path = output_dir / f"{safe_tag}__frame_{safe_frame}.png"
+    else:
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+    return out_path
+
+
+# COCO-17 left/right index pairs for the four body segments we visualize.
+KEYPOINT_PAIRS = {
+    "head":     (1, 2),    # left_eye, right_eye
+    "shoulder": (5, 6),    # left_shoulder, right_shoulder
+    "hip":      (11, 12),  # left_hip, right_hip
+    "foot":     (15, 16),  # left_ankle, right_ankle
+}
+
+
+def _pixel_xy(raw_kps, kp_idx: int, conf_thresh: float = 0.0):
+    """Return ``(x, y)`` for a raw COCO keypoint if its confidence passes."""
+    if raw_kps is None or len(raw_kps) <= kp_idx:
+        return None
+    kp = raw_kps[kp_idx]
+    if len(kp) < 3 or float(kp[2]) < conf_thresh:
+        return None
+    x, y = float(kp[0]), float(kp[1])
+    if not (math.isfinite(x) and math.isfinite(y)):
+        return None
+    return x, y
+
+
+def _world_xy(kp_world, kp_idx: int):
+    """Return ``(x, y)`` for a projected-world keypoint if present."""
+    if kp_world is None or len(kp_world) <= kp_idx:
+        return None
+    kp = kp_world[kp_idx]
+    if kp is None:
+        return None
+    x, y = float(kp[0]), float(kp[1])
+    if not (math.isfinite(x) and math.isfinite(y)):
+        return None
+    return x, y
+
+
+def _numeric_sort_key(value):
+    try:
+        return (0, float(value))
+    except (TypeError, ValueError):
+        return (1, str(value))
+
+
+def plot_keypoints_subplots(
+    frame_id: str,
+    raw_by_track: dict,
+    world_by_track: dict,
+    image_path: Path | None,
+    out_path: Path,
+    source_tag: str,
+    world_bounds: tuple[float, float, float, float] | None = None,
+    time_str: str = "",
+    seg_info: str = "",
+    conf_thresh: float = 0.0,
+    marker_size_px: float = 5.0,
+    marker_size_world: float = 6.0,
+    dpi: int = 100,
+    keypoint_image_size: tuple[int, int] | None = None,
+) -> Path:
+    """Render a two-subplot figure combining pixel keypoints and the bird's-eye view.
+
+    Left subplot: background frame image (if available) with head / shoulder /
+    hip / foot left+right keypoints drawn on their raw pixel positions,
+    connected by a thin line per pair. When ``keypoint_image_size`` is set to
+    the (width, height) the raw keypoints were produced at, and the background
+    image is at a different resolution, the keypoints are scaled so they line
+    up with the image pixels.
+
+    Right subplot: the same keypoints after world back-projection, drawn as a
+    top-down (bird's-eye) view.
+    """
+    fig, (ax_img, ax_world) = plt.subplots(1, 2, figsize=(16.0, 8.0), dpi=dpi)
+
+    img_loaded = False
+    img_scale_x = 1.0
+    img_scale_y = 1.0
+    if image_path is not None:
+        image_path = Path(image_path)
+        if image_path.is_file():
+            try:
+                img = plt.imread(str(image_path))
+                ax_img.imshow(img)
+                img_loaded = True
+                if keypoint_image_size is not None and img.ndim >= 2:
+                    img_h, img_w = img.shape[0], img.shape[1]
+                    kp_w, kp_h = keypoint_image_size
+                    if kp_w > 0 and kp_h > 0:
+                        img_scale_x = img_w / float(kp_w)
+                        img_scale_y = img_h / float(kp_h)
+            except Exception as exc:  # noqa: BLE001
+                ax_img.text(
+                    0.5, 0.5, f"Failed to read:\n{image_path}\n({exc})",
+                    color="white", ha="center", va="center",
+                    transform=ax_img.transAxes, fontsize=9,
+                )
+    if not img_loaded:
+        ax_img.set_facecolor("#222222")
+        msg = "Frame image not found"
+        if image_path is not None:
+            msg = f"Frame image not found:\n{image_path}"
+        ax_img.text(
+            0.5, 0.5, msg, color="white", ha="center", va="center",
+            transform=ax_img.transAxes, fontsize=10,
+        )
+
+    track_ids = sorted(raw_by_track.keys(), key=_numeric_sort_key)
+
+    for track_id in track_ids:
+        raw = raw_by_track.get(track_id)
+        world = world_by_track.get(track_id, [None] * 17)
+
+        for seg_name, (l_idx, r_idx) in KEYPOINT_PAIRS.items():
+            color = SEGMENT_COLORS[seg_name]
+
+            l_px = _pixel_xy(raw, l_idx, conf_thresh)
+            r_px = _pixel_xy(raw, r_idx, conf_thresh)
+            l_px_s = (l_px[0] * img_scale_x, l_px[1] * img_scale_y) if l_px is not None else None
+            r_px_s = (r_px[0] * img_scale_x, r_px[1] * img_scale_y) if r_px is not None else None
+            for px in (l_px_s, r_px_s):
+                if px is not None:
+                    ax_img.plot(
+                        px[0], px[1], marker="o", color=color,
+                        markersize=marker_size_px, markeredgecolor="white",
+                        markeredgewidth=0.6, linestyle="none", zorder=3,
+                    )
+            if l_px_s is not None and r_px_s is not None:
+                ax_img.plot(
+                    [l_px_s[0], r_px_s[0]], [l_px_s[1], r_px_s[1]],
+                    color=color, linewidth=1.1, alpha=0.85, zorder=2,
+                )
+
+            l_w = _world_xy(world, l_idx)
+            r_w = _world_xy(world, r_idx)
+            for wp in (l_w, r_w):
+                if wp is not None:
+                    ax_world.plot(
+                        wp[0], wp[1], marker="o", color=color,
+                        markersize=marker_size_world, markeredgecolor="black",
+                        markeredgewidth=0.5, linestyle="none", zorder=3,
+                    )
+            if l_w is not None and r_w is not None:
+                ax_world.plot(
+                    [l_w[0], r_w[0]], [l_w[1], r_w[1]],
+                    color=color, linewidth=1.1, alpha=0.85, zorder=2,
+                )
+
+        sh_l = _pixel_xy(raw, 5, conf_thresh)
+        sh_r = _pixel_xy(raw, 6, conf_thresh)
+        if sh_l is not None and sh_r is not None:
+            cx = (sh_l[0] + sh_r[0]) / 2.0 * img_scale_x
+            cy = (sh_l[1] + sh_r[1]) / 2.0 * img_scale_y
+            ax_img.text(
+                cx, cy - 12.0 * img_scale_y, track_id, color="yellow",
+                fontsize=9, ha="center", zorder=4,
+                bbox=dict(facecolor="black", edgecolor="none",
+                          alpha=0.55, pad=1.0),
+            )
+
+        hip_l = _world_xy(world, 11)
+        hip_r = _world_xy(world, 12)
+        if hip_l is not None and hip_r is not None:
+            hx = (hip_l[0] + hip_r[0]) / 2.0
+            hy = (hip_l[1] + hip_r[1]) / 2.0
+            ax_world.text(
+                hx + 0.08, hy + 0.08, track_id, color="black", fontsize=9,
+                zorder=4,
+                bbox=dict(facecolor="white", edgecolor="none",
+                          alpha=0.7, pad=1.0),
+            )
+
+    ax_img.set_title("Keypoints on frame (pixel coords)")
+    ax_img.set_xlabel("x (px)")
+    ax_img.set_ylabel("y (px)")
+    if img_loaded:
+        ax_img.set_aspect("equal", adjustable="box")
+
+    if world_bounds is not None:
+        xmin, xmax, ymin, ymax = world_bounds
+        ax_world.set_xlim(xmin, xmax)
+        ax_world.set_ylim(ymin, ymax)
+    ax_world.set_aspect("equal", adjustable="box")
+    ax_world.grid(True, linestyle=":", alpha=0.5)
+    ax_world.set_title("Projected keypoints (bird's-eye view)")
+    ax_world.set_xlabel("X (m)")
+    ax_world.set_ylabel("Y (m)")
+
+    legend_handles = [
+        Line2D(
+            [0], [0], color=SEGMENT_COLORS[seg], marker="o",
+            markersize=7, linestyle="-", linewidth=1.5, label=seg,
+        )
+        for seg in SEGMENT_ORDER
+    ]
+    fig.legend(
+        handles=legend_handles, loc="lower center", ncol=4,
+        frameon=True, fontsize=9,
+        bbox_to_anchor=(0.5, 0.01),
     )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    safe_tag = _sanitize(source_tag)
-    safe_frame = _sanitize(frame_id)
-    out_path = output_dir / f"{safe_tag}__frame_{safe_frame}.png"
-    fig.tight_layout()
+    extra = []
+    if time_str:
+        extra.append(time_str)
+    if seg_info:
+        extra.append(seg_info)
+    extra_part = "  |  " + "  |  ".join(extra) if extra else ""
+    fig.suptitle(
+        f"{source_tag}  |  frame {frame_id}{extra_part}",
+        fontsize=11, y=0.98,
+    )
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout(rect=[0, 0.06, 1, 0.95])
     fig.savefig(out_path)
     plt.close(fig)
     return out_path

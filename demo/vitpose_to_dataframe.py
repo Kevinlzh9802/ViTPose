@@ -65,6 +65,16 @@ CAMERA_PARAMS_ROOT = Path(
     "gopro_data/camera_calibration/camera_params"
 )
 
+# --- Resolution bookkeeping ---------------------------------------------- #
+# The ViTPose JSONs store keypoints in the resolution that was actually fed to
+# the network (960 x 540 in this pipeline). The camera intrinsics, however,
+# were calibrated at the full GoPro resolution (1920 x 1080). Before we can
+# undistort / back-project the keypoints we therefore need to map them into
+# the intrinsic's coordinate system by multiplying (u, v) with the ratio
+# ``INTRINSIC_IMAGE_SIZE / KEYPOINT_IMAGE_SIZE``.
+KEYPOINT_IMAGE_SIZE = (960, 540)      # (width, height) of VitPose output
+INTRINSIC_IMAGE_SIZE = (1920, 1080)   # (width, height) at which K/D live
+
 # COCO-17 keypoint heights as a fraction of body height above the floor.
 KP_HEIGHT_RATIOS = np.array([
     0.95,   #  0 nose
@@ -105,6 +115,16 @@ SEGMENT_FALLBACKS = {
 # --- Time-mapping and GT-group constants --------------------------------- #
 FPS = 60
 FRAMES_PER_BATCH = 18000  # 60 fps × 300 s = 5 min per batch
+FRAMES_PER_SEG = 600       # each raw video segment is 10 s at 60 fps (210 segs / 35 min)
+
+# Root directory holding cam<XX>/cam<XX>_seg<YYY>_frame0.jpg preview images.
+FRAMES_ROOT_DEFAULT = Path(
+    "/tudelft.net/staff-umbrella/neon/ingroup_dataset/"
+    "B2_pipeline/video_segs_raw"
+)
+
+# How often (in frames) to render diagnostic plots when --plot_dir is set.
+PLOT_FRAME_INTERVAL = 1200  # every 20 s at 60 fps
 
 
 def batch_number_from_name(cam_name: str) -> int | None:
@@ -351,6 +371,17 @@ def segment_xy_and_orientation(kp_world: list, segment_name: str) -> tuple[float
     return math.nan, math.nan, math.nan
 
 
+def keypoint_to_intrinsic_scale(
+    keypoint_size: tuple[int, int] = KEYPOINT_IMAGE_SIZE,
+    intrinsic_size: tuple[int, int] = INTRINSIC_IMAGE_SIZE,
+) -> tuple[float, float]:
+    """Return (sx, sy) that map a keypoint pixel into the intrinsic's frame."""
+    return (
+        intrinsic_size[0] / keypoint_size[0],
+        intrinsic_size[1] / keypoint_size[1],
+    )
+
+
 def project_person_keypoints_to_world(
     raw_kps: list,
     K: np.ndarray,
@@ -359,8 +390,14 @@ def project_person_keypoints_to_world(
     tvec: np.ndarray,
     body_height: float,
     conf_thresh: float,
+    keypoint_size: tuple[int, int] = KEYPOINT_IMAGE_SIZE,
+    intrinsic_size: tuple[int, int] = INTRINSIC_IMAGE_SIZE,
 ) -> list:
-    """Project one person's 17 COCO keypoints to world coordinates."""
+    """Project one person's 17 COCO keypoints to world coordinates.
+
+    ``raw_kps`` are expected in ``keypoint_size`` pixel coordinates; they are
+    rescaled to ``intrinsic_size`` before running through ``K``/``D``.
+    """
     if len(raw_kps) != 17:
         raise ValueError("Expected 17 COCO keypoints, got {}".format(len(raw_kps)))
 
@@ -369,7 +406,11 @@ def project_person_keypoints_to_world(
     if not valid_idx:
         return kp_world
 
-    pts_uv = np.array([[raw_kps[i][0], raw_kps[i][1]] for i in valid_idx], dtype=np.float64)
+    sx, sy = keypoint_to_intrinsic_scale(keypoint_size, intrinsic_size)
+    pts_uv = np.array(
+        [[raw_kps[i][0] * sx, raw_kps[i][1] * sy] for i in valid_idx],
+        dtype=np.float64,
+    )
     norm_xy = undistort_points(pts_uv, K, D)
 
     for j, kp_idx in enumerate(valid_idx):
@@ -423,7 +464,8 @@ def process_vitpose_json(
     conf_thresh: float = CONF_THRESHOLD,
     batch_number: int | None = None,
     gt_groups: dict[str, str] | None = None,
-) -> pd.DataFrame:
+    plot_frame_interval: int | None = None,
+) -> tuple[pd.DataFrame, dict]:
     """
     Process a single vitpose_keypoints.json into a dataframe indexed by frame id.
 
@@ -433,6 +475,14 @@ def process_vitpose_json(
         - spaceFeat
         - groups      (list of sets from GT CSV, empty if time not in CSV)
         - group_ids
+
+    When ``plot_frame_interval`` is set, for every Nth frame (by position, not
+    by id) the raw COCO keypoints and their back-projected world counterparts
+    are captured in the returned ``plot_samples`` dict, keyed by the local frame
+    id. The mapping has the shape::
+
+        {frame_id: {"raw": {track_id: 17x3 list},
+                    "world": {track_id: 17-list of (x, y, z) | None}}}
     """
     input_path = Path(input_path)
     with open(input_path) as f:
@@ -446,17 +496,27 @@ def process_vitpose_json(
     R, _ = cv2.Rodrigues(rvec)
 
     records = []
+    plot_samples: dict[str, dict] = {}
     annotations = data.get("annotations", {})
-    for frame_id in sorted(annotations.keys(), key=numeric_sort_key):
+    sorted_frame_ids = sorted(annotations.keys(), key=numeric_sort_key)
+    for frame_idx, frame_id in enumerate(sorted_frame_ids):
         frame_data = annotations[frame_id]
         keypoints_by_track = frame_data.get("keypoints", {})
         sorted_track_ids = sorted(keypoints_by_track.keys(), key=numeric_sort_key)
 
+        capture_plot = (
+            plot_frame_interval is not None
+            and plot_frame_interval > 0
+            and frame_idx % plot_frame_interval == 0
+        )
+        raw_by_track: dict[str, list] = {}
+        world_by_track: dict[str, list] = {}
+
         segment_rows = {segment_name: [] for segment_name in ORIENTATION_PAIRS}
         for track_id in sorted_track_ids:
-            person_segments = process_person_keypoints(
-                keypoints_by_track[track_id],
-                person_id=str(track_id),
+            raw_kps = keypoints_by_track[track_id]
+            kp_world = project_person_keypoints_to_world(
+                raw_kps,
                 K=K,
                 D=D,
                 R=R,
@@ -464,8 +524,13 @@ def process_vitpose_json(
                 body_height=body_height,
                 conf_thresh=conf_thresh,
             )
-            for segment_name, row in person_segments.items():
-                segment_rows[segment_name].append(row)
+            for segment_name in ORIENTATION_PAIRS:
+                x, y, theta = segment_xy_and_orientation(kp_world, segment_name)
+                segment_rows[segment_name].append([str(track_id), x, y, theta])
+
+            if capture_plot:
+                raw_by_track[str(track_id)] = raw_kps
+                world_by_track[str(track_id)] = kp_world
 
         spacefeat = {}
         for segment_name, rows in segment_rows.items():
@@ -500,12 +565,173 @@ def process_vitpose_json(
             }
         )
 
+        if capture_plot:
+            plot_samples[str(frame_id)] = {
+                "raw": raw_by_track,
+                "world": world_by_track,
+            }
+
     df = pd.DataFrame(records)
     if not df.empty:
         df.index = df["timestamp"]
         df.index.name = "timestamp"
 
-    return df
+    return df, plot_samples
+
+
+def _global_frame_index(batch_number: int | None, local_frame: int) -> int:
+    """Map a local per-batch frame index to a global frame index across batches."""
+    if batch_number is None:
+        return local_frame
+    return (batch_number - 1) * FRAMES_PER_BATCH + local_frame
+
+
+def _seg_info_for_global_frame(global_frame: int) -> tuple[int, int]:
+    """Return ``(seg_number_1_indexed, frame_within_seg)`` for a global frame."""
+    seg_num = global_frame // FRAMES_PER_SEG + 1
+    local = global_frame % FRAMES_PER_SEG
+    return seg_num, local
+
+
+def _seg_frame_image_path(
+    frames_root: Path | None, cam_number: str, seg_num: int
+) -> Path | None:
+    """Build the path to ``camXX/camXX_segYYY_frame0.jpg`` if frames_root is set."""
+    if frames_root is None:
+        return None
+    cam_tag = f"cam{cam_number}"
+    return (
+        Path(frames_root) / cam_tag / f"{cam_tag}_seg{seg_num:03d}_frame0.jpg"
+    )
+
+
+def _render_position_plots(
+    df: pd.DataFrame,
+    cam_number: str,
+    batch_number: int | None,
+    cam_plot_dir: Path,
+    frame_interval: int,
+    shared_bounds_override: tuple[float, float, float, float] | None = None,
+) -> None:
+    """Render the existing top-down position plots into ``cam_plot_dir``.
+
+    Filenames use the global frame index so plots from all batches of the same
+    camera can coexist in one folder and sort chronologically.
+    """
+    from demo.plot_person import (
+        DEFAULT_SEGMENT,
+        compute_plot_bounds,
+        plot_single_frame,
+    )
+
+    if len(df) == 0:
+        return
+
+    bounds = (
+        shared_bounds_override
+        if shared_bounds_override is not None
+        else compute_plot_bounds(df, segment=DEFAULT_SEGMENT)
+    )
+    cam_tag = f"cam{cam_number}"
+    selected = df.iloc[::frame_interval]
+
+    for frame_id, row in selected.iterrows():
+        try:
+            local_frame = int(frame_id)
+        except (ValueError, TypeError):
+            local_frame = 0
+        global_frame = _global_frame_index(batch_number, local_frame)
+        out_path = (
+            cam_plot_dir
+            / f"{cam_tag}__position_frame_{global_frame:07d}.png"
+        )
+
+        groups = row.get("groups") if "groups" in row.index else None
+        time_str = row.get("time", "") if "time" in row.index else ""
+        batch_part = (
+            f"batch{batch_number:02d}" if batch_number is not None else "batch??"
+        )
+        time_part = f"  |  {time_str}" if time_str else ""
+        title = (
+            f"{cam_tag}  |  {batch_part}  |  global frame {global_frame}"
+            f"  (local {local_frame}){time_part}"
+        )
+        plot_single_frame(
+            frame_id=str(frame_id),
+            spacefeat=row["spaceFeat"],
+            source_tag=cam_tag,
+            output_dir=cam_plot_dir,
+            bounds=bounds,
+            groups=groups if isinstance(groups, list) and groups else None,
+            time_str=str(time_str) if time_str else "",
+            out_path=out_path,
+            title_override=title,
+        )
+
+
+def _render_keypoints_plots(
+    df: pd.DataFrame,
+    plot_samples: dict,
+    cam_number: str,
+    batch_number: int | None,
+    cam_plot_dir: Path,
+    frames_root: Path | None,
+    shared_bounds_override: tuple[float, float, float, float] | None = None,
+) -> None:
+    """Render per-sample combined keypoint figures (pixel + bird's-eye)."""
+    from demo.plot_person import (
+        DEFAULT_SEGMENT,
+        compute_plot_bounds,
+        plot_keypoints_subplots,
+    )
+
+    if not plot_samples:
+        return
+
+    bounds = (
+        shared_bounds_override
+        if shared_bounds_override is not None
+        else compute_plot_bounds(df, segment=DEFAULT_SEGMENT)
+    )
+    cam_tag = f"cam{cam_number}"
+
+    for frame_id, sample in plot_samples.items():
+        try:
+            local_frame = int(frame_id)
+        except (ValueError, TypeError):
+            local_frame = 0
+        global_frame = _global_frame_index(batch_number, local_frame)
+        seg_num, seg_local = _seg_info_for_global_frame(global_frame)
+        image_path = _seg_frame_image_path(frames_root, cam_number, seg_num)
+
+        time_str = ""
+        if frame_id in df.index:
+            try:
+                time_str = str(df.loc[frame_id, "time"])
+            except KeyError:
+                time_str = ""
+
+        out_path = (
+            cam_plot_dir
+            / f"{cam_tag}__keypoints_frame_{global_frame:07d}.png"
+        )
+        seg_info = f"seg{seg_num:03d} (offset {seg_local} frames)"
+        batch_part = (
+            f"batch{batch_number:02d}" if batch_number is not None else "batch??"
+        )
+        source_tag = f"{cam_tag}  |  {batch_part}  |  global frame {global_frame}"
+        plot_keypoints_subplots(
+            frame_id=str(frame_id),
+            raw_by_track=sample["raw"],
+            world_by_track=sample["world"],
+            image_path=image_path,
+            out_path=out_path,
+            source_tag=source_tag,
+            world_bounds=bounds,
+            time_str=time_str,
+            seg_info=seg_info,
+            keypoint_image_size=KEYPOINT_IMAGE_SIZE,
+        )
 
 
 def process_results_directory(
@@ -518,16 +744,35 @@ def process_results_directory(
     camera_numbers=None,
     gt_groups_root: str | Path | None = None,
     plot_dir: str | Path | None = None,
+    frames_root: str | Path | None = None,
+    plot_frame_interval: int = PLOT_FRAME_INTERVAL,
 ) -> None:
     """
     Walk every cam*/vitpose_keypoints.json under results_dir and write a
     dataframe alongside the input, or under output_dir/<cam_name>/.
+
+    When ``plot_dir`` is set, two kinds of diagnostic plots are written under
+    ``plot_dir/cam<XX>/`` every ``plot_frame_interval`` frames (1200 by default,
+    i.e. every 20 s at 60 fps):
+
+        * ``cam<XX>__position_frame_<global>.png`` – top-down position plot.
+        * ``cam<XX>__keypoints_frame_<global>.png`` – two-subplot figure with
+          raw pixel keypoints overlaid on the source video frame (left) and
+          the same keypoints back-projected to the bird's-eye view (right).
+
+    Batches are assumed to be consecutive 5-minute blocks, so global frames are
+    computed as ``(batch - 1) * 18000 + local_frame``. The seg image used for
+    the overlay is ``cam<XX>_seg<YYY>_frame0.jpg`` from ``frames_root``, where
+    each seg is a 10-second / 600-frame block.
     """
     results_dir = Path(results_dir)
     selected_camera_numbers = parse_camera_numbers(camera_numbers)
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+    if frames_root is not None:
+        frames_root = Path(frames_root)
 
     # Pre-load GT group CSVs keyed by csv filename
     _gt_csv_cache: dict[str, dict[str, str]] = {}
@@ -562,7 +807,7 @@ def process_results_directory(
                 gt_groups = _gt_csv_cache[csv_name]
 
         print(f"  Processing {json_file.relative_to(results_dir)}")
-        df = process_vitpose_json(
+        df, plot_samples = process_vitpose_json(
             json_file,
             cam_number=cam_number,
             camera_params_root=camera_params_root,
@@ -570,6 +815,7 @@ def process_results_directory(
             conf_thresh=conf_thresh,
             batch_number=batch_num,
             gt_groups=gt_groups,
+            plot_frame_interval=plot_frame_interval if plot_dir is not None else None,
         )
 
         if output_dir is not None:
@@ -581,16 +827,24 @@ def process_results_directory(
         df.to_pickle(out_path)
         print(f"    -> {out_path}")
 
-        # Plot position/orientation every 60 seconds (3600 frames at 60 fps)
         if plot_dir is not None:
-            from demo.plot_person import plot_dataframe_positions
+            cam_plot_dir = Path(plot_dir) / f"cam{cam_number}"
+            cam_plot_dir.mkdir(parents=True, exist_ok=True)
 
-            cam_plot_dir = Path(plot_dir) / cam_name
-            plot_dataframe_positions(
-                df,
-                source_tag=cam_name,
-                output_dir=cam_plot_dir,
-                frame_interval=FPS * 60,  # every 60 seconds
+            _render_position_plots(
+                df=df,
+                cam_number=cam_number,
+                batch_number=batch_num,
+                cam_plot_dir=cam_plot_dir,
+                frame_interval=plot_frame_interval,
+            )
+            _render_keypoints_plots(
+                df=df,
+                plot_samples=plot_samples,
+                cam_number=cam_number,
+                batch_number=batch_num,
+                cam_plot_dir=cam_plot_dir,
+                frames_root=frames_root,
             )
 
 
@@ -650,8 +904,27 @@ def parse_args():
         "--plot_dir",
         default=None,
         help=(
-            "Optional directory for position/orientation plots. "
-            "If set, plots are written every 60 seconds per camera."
+            "Optional directory for diagnostic plots. If set, position and "
+            "keypoint plots are written every PLOT_FRAME_INTERVAL frames under "
+            "<plot_dir>/cam<XX>/ (no batch sub-folders)."
+        ),
+    )
+    parser.add_argument(
+        "--frames_root",
+        default=str(FRAMES_ROOT_DEFAULT),
+        help=(
+            "Root containing cam<XX>/cam<XX>_seg<YYY>_frame0.jpg preview "
+            "images used as background for keypoint plots. Default on DAIC: "
+            f"{FRAMES_ROOT_DEFAULT}"
+        ),
+    )
+    parser.add_argument(
+        "--plot_frame_interval",
+        type=int,
+        default=PLOT_FRAME_INTERVAL,
+        help=(
+            "Frames between consecutive diagnostic plots (default: "
+            f"{PLOT_FRAME_INTERVAL} = every 20 s at 60 fps)."
         ),
     )
     return parser.parse_args()
@@ -669,4 +942,6 @@ if __name__ == "__main__":
         camera_numbers=args.camera_numbers,
         gt_groups_root=args.gt_groups_root,
         plot_dir=args.plot_dir,
+        frames_root=args.frames_root,
+        plot_frame_interval=args.plot_frame_interval,
     )

@@ -25,6 +25,7 @@ CAMERA_PARAMS_ROOT="${CAMERA_PARAMS_ROOT:-${NEON}/ingroup_dataset/processed_data
 CAMERA_NUMBERS="${CAMERA_NUMBERS:-}"
 GT_GROUPS_ROOT="${GT_GROUPS_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/cgroup_annotation}"
 PLOT_DIR="${PLOT_DIR:-${NEON}/ingroup_dataset/B2_pipeline/person_plotting}"
+FRAMES_ROOT="${FRAMES_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/video_segs_raw}"
 
 for arg in "$@"; do
     case "$arg" in
@@ -39,6 +40,9 @@ for arg in "$@"; do
             ;;
         --plot_dir=*)
             PLOT_DIR="${arg#--plot_dir=}"
+            ;;
+        --frames_root=*)
+            FRAMES_ROOT="${arg#--frames_root=}"
             ;;
         *)
             echo "Error: unknown argument '$arg'" >&2
@@ -65,6 +69,7 @@ echo "  output_root=${OUTPUT_ROOT}"
 echo "  camera_params_root=${CAMERA_PARAMS_ROOT}"
 echo "  gt_groups_root=${GT_GROUPS_ROOT}"
 echo "  plot_dir=${PLOT_DIR}"
+echo "  frames_root=${FRAMES_ROOT}"
 if [[ -n "${CAMERA_NUMBERS}" ]]; then
     echo "  camera_numbers=${CAMERA_NUMBERS}"
 fi
@@ -76,6 +81,7 @@ python_args=(
     --camera_params_root "${CAMERA_PARAMS_ROOT}"
     --gt_groups_root "${GT_GROUPS_ROOT}"
     --plot_dir "${PLOT_DIR}"
+    --frames_root "${FRAMES_ROOT}"
 )
 
 if [[ -n "${CAMERA_NUMBERS}" ]]; then
