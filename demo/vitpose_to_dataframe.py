@@ -262,26 +262,57 @@ def orientation_from_pair(left_xy, right_xy) -> float | None:
     return math.atan2(dx, -dy)
 
 
-def normalize_distortion_coefficients(coeffs) -> np.ndarray:
-    """
-    Convert a short distortion vector into an OpenCV-compatible array.
+DEFAULT_CAMERA_MODEL = "fisheye"  # "fisheye" (Kannala-Brandt) or "pinhole"
 
-    The provided JSON examples use [k1, k2, k3]. OpenCV's pinhole model expects
-    [k1, k2, p1, p2, k3], so tangential terms are padded with zeros.
+
+def normalize_distortion_coefficients(
+    coeffs, model: str = DEFAULT_CAMERA_MODEL
+) -> np.ndarray:
+    """
+    Convert a distortion vector into the shape expected by the OpenCV routine
+    for the requested ``model``.
+
+    Fisheye (Kannala-Brandt): exactly 4 radial coefficients ``[k1, k2, k3, k4]``.
+    Pinhole: OpenCV expects ``[k1, k2, p1, p2, k3]`` (5 values). Older data with
+    a 3-element vector ``[k1, k2, k3]`` is padded with zero tangential terms.
     """
     dist = np.asarray(coeffs, dtype=np.float64).reshape(-1)
-    if dist.size == 3:
-        dist = np.array([dist[0], dist[1], 0.0, 0.0, dist[2]], dtype=np.float64)
-    elif dist.size not in {4, 5, 8, 12, 14}:
-        raise ValueError("Unsupported distortion coefficient length: {}".format(dist.size))
-    return dist
+
+    if model == "fisheye":
+        if dist.size == 4:
+            return dist
+        if dist.size == 3:
+            # libCalib sometimes drops the last k4 when it was fixed at zero.
+            return np.array([dist[0], dist[1], dist[2], 0.0], dtype=np.float64)
+        if dist.size > 4:
+            return dist[:4].copy()
+        raise ValueError(
+            f"Fisheye model needs at least 3 coefficients, got {dist.size}."
+        )
+
+    if model == "pinhole":
+        if dist.size == 3:
+            return np.array([dist[0], dist[1], 0.0, 0.0, dist[2]], dtype=np.float64)
+        if dist.size in {4, 5, 8, 12, 14}:
+            return dist
+        raise ValueError(
+            f"Unsupported pinhole distortion length: {dist.size}"
+        )
+
+    raise ValueError(f"Unknown camera model: {model!r}")
 
 
 def load_camera_params(
     cam_number: str | int,
     camera_params_root: str | Path = CAMERA_PARAMS_ROOT,
 ) -> dict:
-    """Load per-camera intrinsics and extrinsics from camera_XX/*.json."""
+    """Load per-camera intrinsics and extrinsics from camera_XX/*.json.
+
+    The intrinsic JSON may include a ``"model"`` field set to ``"fisheye"``
+    (Kannala-Brandt, matches ``libCalib::CameraModelOpenCVFisheye``) or
+    ``"pinhole"``. When the field is absent we default to
+    :data:`DEFAULT_CAMERA_MODEL` (fisheye).
+    """
     cam_id = str(cam_number).zfill(2)
     cache_key = (str(Path(camera_params_root)), cam_id)
     if cache_key in _camera_params_cache:
@@ -296,9 +327,19 @@ def load_camera_params(
     with open(extrinsic_path) as f:
         extrinsic_data = json.load(f)
 
+    model = str(intrinsic_data.get("model", DEFAULT_CAMERA_MODEL)).lower()
+    if model not in {"fisheye", "pinhole"}:
+        raise ValueError(
+            f"Unknown camera model {model!r} in {intrinsic_path}; "
+            "expected 'fisheye' or 'pinhole'."
+        )
+
     params = {
+        "model": model,
         "K": np.asarray(intrinsic_data["intrinsic"], dtype=np.float64),
-        "D": normalize_distortion_coefficients(intrinsic_data["distortion_coefficients"]),
+        "D": normalize_distortion_coefficients(
+            intrinsic_data["distortion_coefficients"], model=model
+        ),
         "rvec": np.asarray(extrinsic_data["rvec"], dtype=np.float64).reshape(3, 1),
         "tvec": np.asarray(extrinsic_data["tvec"], dtype=np.float64).reshape(3, 1),
     }
@@ -306,10 +347,25 @@ def load_camera_params(
     return params
 
 
-def undistort_points(pts_uv: np.ndarray, K: np.ndarray, D: np.ndarray) -> np.ndarray:
-    """Undistort pixel coordinates into normalized camera coordinates."""
+def undistort_points(
+    pts_uv: np.ndarray,
+    K: np.ndarray,
+    D: np.ndarray,
+    model: str = DEFAULT_CAMERA_MODEL,
+) -> np.ndarray:
+    """Undistort pixel coordinates into normalized camera coordinates.
+
+    Dispatches to the fisheye (Kannala-Brandt) or pinhole undistortion routine
+    based on ``model``. Fisheye expects D of length 4; pinhole expects 4/5/8/12/14.
+    """
     pts = pts_uv.reshape(-1, 1, 2).astype(np.float64)
-    undistorted = cv2.undistortPoints(pts, K, D)
+    if model == "fisheye":
+        D_fisheye = np.asarray(D, dtype=np.float64).reshape(-1, 1)[:4]
+        undistorted = cv2.fisheye.undistortPoints(pts, K, D_fisheye)
+    elif model == "pinhole":
+        undistorted = cv2.undistortPoints(pts, K, D)
+    else:
+        raise ValueError(f"Unknown camera model: {model!r}")
     return undistorted.reshape(-1, 2)
 
 
@@ -392,11 +448,13 @@ def project_person_keypoints_to_world(
     conf_thresh: float,
     keypoint_size: tuple[int, int] = KEYPOINT_IMAGE_SIZE,
     intrinsic_size: tuple[int, int] = INTRINSIC_IMAGE_SIZE,
+    model: str = DEFAULT_CAMERA_MODEL,
 ) -> list:
     """Project one person's 17 COCO keypoints to world coordinates.
 
     ``raw_kps`` are expected in ``keypoint_size`` pixel coordinates; they are
-    rescaled to ``intrinsic_size`` before running through ``K``/``D``.
+    rescaled to ``intrinsic_size`` before being undistorted via the given
+    camera ``model`` (fisheye or pinhole).
     """
     if len(raw_kps) != 17:
         raise ValueError("Expected 17 COCO keypoints, got {}".format(len(raw_kps)))
@@ -411,7 +469,7 @@ def project_person_keypoints_to_world(
         [[raw_kps[i][0] * sx, raw_kps[i][1] * sy] for i in valid_idx],
         dtype=np.float64,
     )
-    norm_xy = undistort_points(pts_uv, K, D)
+    norm_xy = undistort_points(pts_uv, K, D, model=model)
 
     for j, kp_idx in enumerate(valid_idx):
         z_kp = body_height * KP_HEIGHT_RATIOS[kp_idx]
@@ -432,6 +490,7 @@ def process_person_keypoints(
     tvec: np.ndarray,
     body_height: float = BODY_HEIGHT,
     conf_thresh: float = CONF_THRESHOLD,
+    model: str = DEFAULT_CAMERA_MODEL,
 ) -> dict[str, list]:
     """
     Convert one person's 17 COCO keypoints into DANTE-style segment rows.
@@ -447,6 +506,7 @@ def process_person_keypoints(
         tvec=tvec,
         body_height=body_height,
         conf_thresh=conf_thresh,
+        model=model,
     )
 
     segment_rows = {}
@@ -493,6 +553,7 @@ def process_vitpose_json(
     D = camera_params["D"]
     rvec = camera_params["rvec"]
     tvec = camera_params["tvec"]
+    camera_model = camera_params.get("model", DEFAULT_CAMERA_MODEL)
     R, _ = cv2.Rodrigues(rvec)
 
     records = []
@@ -523,6 +584,7 @@ def process_vitpose_json(
                 tvec=tvec,
                 body_height=body_height,
                 conf_thresh=conf_thresh,
+                model=camera_model,
             )
             for segment_name in ORIENTATION_PAIRS:
                 x, y, theta = segment_xy_and_orientation(kp_world, segment_name)
