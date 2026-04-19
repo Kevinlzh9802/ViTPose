@@ -132,18 +132,18 @@ PLOT_FRAME_INTERVAL = 1200  # every 20 s at 60 fps
 BEV_HALF_WIDTH_XY = (4.0, 3.0)
 
 # 2D rotation applied to every back-projected world (X, Y) BEFORE it enters the
-# dataframe / BEV plot. The current matrix corresponds to a 90 degrees CCW
-# rotation of the world plane (equivalently, a 90 degrees CW rotation of the
+# dataframe / BEV plot. The current matrix corresponds to a 90 degrees CW
+# rotation of the world plane (equivalently, a 90 degrees CCW rotation of the
 # displayed image):
 #
-#     plot_x  =  -world_Y
-#     plot_y  =  +world_X
+#     plot_x  =  +world_Y
+#     plot_y  =  -world_X
 #
 # Both the saved pkl's ``spaceFeat`` columns and all BEV plots use this rotated
 # frame; set ``WORLD_REORIENTATION_2D = np.eye(2)`` to disable.
 WORLD_REORIENTATION_2D = np.array(
-    [[0.0, -1.0],
-     [1.0,  0.0]],
+    [[ 0.0, 1.0],
+     [-1.0, 0.0]],
     dtype=np.float64,
 )
 
