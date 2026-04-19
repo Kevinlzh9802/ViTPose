@@ -126,6 +126,11 @@ FRAMES_ROOT_DEFAULT = Path(
 # How often (in frames) to render diagnostic plots when --plot_dir is set.
 PLOT_FRAME_INTERVAL = 1200  # every 20 s at 60 fps
 
+# Bird's-eye plot window, expressed as (half_width_x, half_width_y) in metres
+# around the camera's (X, Y) world position. A window of ±4 m × ±3 m covers an
+# 8 m × 6 m floor area centred under each ceiling camera.
+BEV_HALF_WIDTH_XY = (4.0, 3.0)
+
 
 def batch_number_from_name(cam_name: str) -> int | None:
     """Extract 1-based batch number, e.g. 'cam06_batch03' -> 3."""
@@ -641,6 +646,27 @@ def process_vitpose_json(
     return df, plot_samples
 
 
+def _camera_center_world_xy(rvec: np.ndarray, tvec: np.ndarray) -> tuple[float, float]:
+    """Return the camera centre's (X, Y) in world coordinates.
+
+    Uses the standard OpenCV convention where ``rvec`` / ``tvec`` map world
+    points into the camera frame, so ``C_world = -R.T @ tvec``.
+    """
+    R, _ = cv2.Rodrigues(np.asarray(rvec, dtype=np.float64))
+    c = -(R.T @ np.asarray(tvec, dtype=np.float64).reshape(3))
+    return float(c[0]), float(c[1])
+
+
+def _bev_bounds_around(
+    center_xy: tuple[float, float],
+    half_widths: tuple[float, float] = BEV_HALF_WIDTH_XY,
+) -> tuple[float, float, float, float]:
+    """Axis-aligned bounds ``(xmin, xmax, ymin, ymax)`` centred on ``center_xy``."""
+    cx, cy = center_xy
+    hx, hy = half_widths
+    return (cx - hx, cx + hx, cy - hy, cy + hy)
+
+
 def _global_frame_index(batch_number: int | None, local_frame: int) -> int:
     """Map a local per-batch frame index to a global frame index across batches."""
     if batch_number is None:
@@ -893,12 +919,27 @@ def process_results_directory(
             cam_plot_dir = Path(plot_dir) / f"cam{cam_number}"
             cam_plot_dir.mkdir(parents=True, exist_ok=True)
 
+            cam_params = load_camera_params(
+                cam_number, camera_params_root=camera_params_root
+            )
+            cam_world_xy = _camera_center_world_xy(
+                cam_params["rvec"], cam_params["tvec"]
+            )
+            bev_bounds = _bev_bounds_around(cam_world_xy)
+            print(
+                f"    [plot] bird's-eye window centred on camera "
+                f"(X={cam_world_xy[0]:.2f} m, Y={cam_world_xy[1]:.2f} m) "
+                f"-> X in [{bev_bounds[0]:.2f}, {bev_bounds[1]:.2f}], "
+                f"Y in [{bev_bounds[2]:.2f}, {bev_bounds[3]:.2f}]"
+            )
+
             _render_position_plots(
                 df=df,
                 cam_number=cam_number,
                 batch_number=batch_num,
                 cam_plot_dir=cam_plot_dir,
                 frame_interval=plot_frame_interval,
+                shared_bounds_override=bev_bounds,
             )
             _render_keypoints_plots(
                 df=df,
@@ -907,6 +948,7 @@ def process_results_directory(
                 batch_number=batch_num,
                 cam_plot_dir=cam_plot_dir,
                 frames_root=frames_root,
+                shared_bounds_override=bev_bounds,
             )
 
 
