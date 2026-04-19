@@ -131,6 +131,28 @@ PLOT_FRAME_INTERVAL = 1200  # every 20 s at 60 fps
 # 8 m × 6 m floor area centred under each ceiling camera.
 BEV_HALF_WIDTH_XY = (4.0, 3.0)
 
+# 2D rotation applied to every back-projected world (X, Y) BEFORE it enters the
+# dataframe / BEV plot. The current matrix corresponds to a 90 degrees CCW
+# rotation of the world plane (equivalently, a 90 degrees CW rotation of the
+# displayed image):
+#
+#     plot_x  =  -world_Y
+#     plot_y  =  +world_X
+#
+# Both the saved pkl's ``spaceFeat`` columns and all BEV plots use this rotated
+# frame; set ``WORLD_REORIENTATION_2D = np.eye(2)`` to disable.
+WORLD_REORIENTATION_2D = np.array(
+    [[0.0, -1.0],
+     [1.0,  0.0]],
+    dtype=np.float64,
+)
+
+
+def apply_world_reorientation_xy(x: float, y: float) -> tuple[float, float]:
+    """Rotate a world ``(X, Y)`` pair into the plot/dataframe frame."""
+    vec = WORLD_REORIENTATION_2D @ np.array([x, y], dtype=np.float64)
+    return float(vec[0]), float(vec[1])
+
 
 def batch_number_from_name(cam_name: str) -> int | None:
     """Extract 1-based batch number, e.g. 'cam06_batch03' -> 3."""
@@ -481,7 +503,8 @@ def project_person_keypoints_to_world(
         xn, yn = norm_xy[j]
         xw, yw = backproject_to_world(xn, yn, z_kp, R, tvec)
         if xw is not None and yw is not None:
-            kp_world[kp_idx] = (xw, yw, z_kp)
+            xw_r, yw_r = apply_world_reorientation_xy(xw, yw)
+            kp_world[kp_idx] = (xw_r, yw_r, z_kp)
 
     return kp_world
 
@@ -647,14 +670,17 @@ def process_vitpose_json(
 
 
 def _camera_center_world_xy(rvec: np.ndarray, tvec: np.ndarray) -> tuple[float, float]:
-    """Return the camera centre's (X, Y) in world coordinates.
+    """Return the camera centre's (X, Y) in the plot/dataframe frame.
 
     Uses the standard OpenCV convention where ``rvec`` / ``tvec`` map world
-    points into the camera frame, so ``C_world = -R.T @ tvec``.
+    points into the camera frame, so ``C_world = -R.T @ tvec``. The same
+    :data:`WORLD_REORIENTATION_2D` rotation that is applied to keypoints is
+    applied here so the BEV window stays centred under the camera after the
+    rotation.
     """
     R, _ = cv2.Rodrigues(np.asarray(rvec, dtype=np.float64))
     c = -(R.T @ np.asarray(tvec, dtype=np.float64).reshape(3))
-    return float(c[0]), float(c[1])
+    return apply_world_reorientation_xy(float(c[0]), float(c[1]))
 
 
 def _bev_bounds_around(
