@@ -16,7 +16,7 @@ module use /opt/insy/modulefiles
 
 NEON=/tudelft.net/staff-umbrella/neon
 VITPOSE_DIR=/home/nfs/zli33/projects/ViTPose
-SIF="${SIF:-${NEON}/apptainer/vlm_social.sif}"
+SIF="${SIF:-${NEON}/apptainer/vitpose-0.0.5.sif}"
 
 RESULTS_ROOT="${RESULTS_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/vitpose_results}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${NEON}/ingroup_dataset/B2_pipeline/vitpose_dataframe}"
