@@ -102,7 +102,7 @@ KP_HEIGHT_RATIOS = np.array([
 
 # Orientation pairs: (left_idx, right_idx)
 ORIENTATION_PAIRS = {
-    "head":     (1,  2),   # left_eye     -> right_eye
+    "head":     (3,  4),   # left_ear     -> right_ear
     "shoulder": (5,  6),   # left_shoulder -> right_shoulder
     "hip":      (11, 12),  # left_hip     -> right_hip
     "foot":     (15, 16),  # left_ankle   -> right_ankle

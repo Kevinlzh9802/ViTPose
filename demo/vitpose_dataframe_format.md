@@ -90,7 +90,7 @@ The body-part rows are built from COCO-17 keypoints:
 
 | `spaceFeat` key | Main keypoint pair |
 | --- | --- |
-| `head` | left eye, right eye |
+| `head` | left ear, right ear |
 | `shoulder` | left shoulder, right shoulder |
 | `hip` | left hip, right hip |
 | `foot` | left ankle, right ankle |
