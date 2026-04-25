@@ -80,20 +80,21 @@ The four columns mean:
 | `person_id` | Track/person id copied from `vitpose_keypoints.json`, stored as a string. |
 | `x` | World-floor x coordinate after camera calibration and back-projection. |
 | `y` | World-floor y coordinate after camera calibration and back-projection. |
-| `orientation` | Body-part orientation in radians, computed from the left/right keypoint pair. |
+| `orientation` | Body-part orientation in radians. For lateral body parts this is computed from the left/right keypoint pair; for head it uses the Conflab `head -> nose` vector. |
 
 If a body part cannot be projected, `x`, `y`, or `orientation` may be `NaN`.
 
 ## Body Part Definitions
 
-The body-part rows are built from COCO-17 keypoints:
+The body-part rows are built from Conflab-17 keypoints, matching
+`configs/_base_/datasets/conflab.py`:
 
 | `spaceFeat` key | Main keypoint pair |
 | --- | --- |
-| `head` | left ear, right ear |
+| `head` | head, nose |
 | `shoulder` | left shoulder, right shoulder |
 | `hip` | left hip, right hip |
-| `foot` | left ankle, right ankle |
+| `foot` | left foot, right foot |
 
 When both keypoints in the pair are visible, `x/y` is their midpoint and `orientation` is computed from the pair. If only fallback keypoints are available, `x/y` is the mean of visible fallback points and `orientation` is `NaN`.
 

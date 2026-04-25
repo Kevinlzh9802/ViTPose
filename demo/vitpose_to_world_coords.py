@@ -1,7 +1,7 @@
 """
 vitpose_to_world_coords.py
 
-Converts ViTPose 2D keypoints (COCO-17) to 2D world floor coordinates and
+Converts ViTPose 2D keypoints (Conflab-17) to 2D world floor coordinates and
 orientations, suitable for Stephanie / DANTE pedestrian trajectory models.
 
 Assumptions
@@ -70,42 +70,48 @@ INTRINSICS_DIR = Path(
 )
 
 # ---------------------------------------------------------------------------
-# COCO-17 KEYPOINT HEIGHT RATIOS  (fraction of body height above the floor)
+# CONFLAB-17 KEYPOINT HEIGHT RATIOS  (fraction of body height above the floor)
 # ---------------------------------------------------------------------------
 # Index  name
-#   0    nose           1  left_eye       2  right_eye
-#   3    left_ear       4  right_ear      5  left_shoulder
-#   6    right_shoulder 7  left_elbow     8  right_elbow
-#   9    left_wrist    10  right_wrist   11  left_hip
-#  12    right_hip     13  left_knee     14  right_knee
-#  15    left_ankle    16  right_ankle
+#   0    head           1  nose           2  neck
+#   3    right_shoulder 4  right_elbow    5  right_wrist
+#   6    left_shoulder  7  left_elbow     8  left_wrist
+#   9    right_hip     10  right_knee    11  right_ankle
+#  12    left_hip      13  left_knee     14  left_ankle
+#  15    right_foot    16  left_foot
 
 KP_HEIGHT_RATIOS = np.array([
-    0.95,   #  0  nose
-    0.97,   #  1  left_eye
-    0.97,   #  2  right_eye
-    0.95,   #  3  left_ear
-    0.95,   #  4  right_ear
-    0.85,   #  5  left_shoulder
-    0.85,   #  6  right_shoulder
+    1.00,   #  0  head
+    0.97,   #  1  nose
+    0.86,   #  2  neck
+    0.85,   #  3  right_shoulder
+    0.68,   #  4  right_elbow
+    0.55,   #  5  right_wrist
+    0.85,   #  6  left_shoulder
     0.68,   #  7  left_elbow
-    0.68,   #  8  right_elbow
-    0.55,   #  9  left_wrist
-    0.55,   # 10  right_wrist
-    0.50,   # 11  left_hip
-    0.50,   # 12  right_hip
+    0.55,   #  8  left_wrist
+    0.50,   #  9  right_hip
+    0.27,   # 10  right_knee
+    0.02,   # 11  right_ankle
+    0.50,   # 12  left_hip
     0.27,   # 13  left_knee
-    0.27,   # 14  right_knee
-    0.02,   # 15  left_ankle
-    0.02,   # 16  right_ankle
+    0.02,   # 14  left_ankle
+    0.00,   # 15  right_foot
+    0.00,   # 16  left_foot
 ])
 
-# Orientation pairs: (left_idx, right_idx)
+# Orientation pairs in Conflab-17 index order.
 ORIENTATION_PAIRS = {
-    "head":     (3,  4),   # left_ear     -> right_ear
-    "shoulder": (5,  6),   # left_shoulder -> right_shoulder
-    "hip":      (11, 12),  # left_hip     -> right_hip
-    "foot":     (15, 16),  # left_ankle   -> right_ankle
+    "head":     (0,  1),   # head         -> nose
+    "shoulder": (6,  3),   # left_shoulder -> right_shoulder
+    "hip":      (12, 9),   # left_hip     -> right_hip
+    "foot":     (16, 15),  # left_foot    -> right_foot
+}
+ORIENTATION_MODES = {
+    "head": "direct",
+    "shoulder": "lateral",
+    "hip": "lateral",
+    "foot": "lateral",
 }
 
 # ---------------------------------------------------------------------------
@@ -222,6 +228,17 @@ def orientation_from_pair(left_xy, right_xy) -> float | None:
     return math.atan2(dx, -dy)
 
 
+def orientation_from_vector(start_xy, end_xy) -> float | None:
+    """Angle of the direct vector from ``start_xy`` to ``end_xy``."""
+    if start_xy is None or end_xy is None:
+        return None
+    dx = end_xy[0] - start_xy[0]
+    dy = end_xy[1] - start_xy[1]
+    if dx == 0.0 and dy == 0.0:
+        return None
+    return math.atan2(dy, dx)
+
+
 def process_person_keypoints(raw_kps: list,
                               K: np.ndarray,
                               D: np.ndarray,
@@ -230,7 +247,7 @@ def process_person_keypoints(raw_kps: list,
                               body_height: float = BODY_HEIGHT,
                               conf_thresh: float = CONF_THRESHOLD) -> dict:
     """
-    Convert one person's 17 COCO keypoints to world coordinates and
+    Convert one person's 17 Conflab keypoints to world coordinates and
     compute body-segment orientations.
 
     raw_kps : list of 17 items, each [u, v, confidence]
@@ -271,7 +288,7 @@ def process_person_keypoints(raw_kps: list,
             keypoints_world.append(None)
 
     # Position: hip midpoint (fallback to visible keypoint average)
-    lh, rh = kp_world[11], kp_world[12]
+    lh, rh = kp_world[12], kp_world[9]
     if lh is not None and rh is not None:
         pos_x = (lh[0] + rh[0]) / 2
         pos_y = (lh[1] + rh[1]) / 2
@@ -289,10 +306,19 @@ def process_person_keypoints(raw_kps: list,
 
     # Orientations
     orientations = {}
-    for name, (l_idx, r_idx) in ORIENTATION_PAIRS.items():
-        l_xy  = (kp_world[l_idx][0], kp_world[l_idx][1]) if kp_world[l_idx] else None
-        r_xy  = (kp_world[r_idx][0], kp_world[r_idx][1]) if kp_world[r_idx] else None
-        theta = orientation_from_pair(l_xy, r_xy)
+    for name, (start_idx, end_idx) in ORIENTATION_PAIRS.items():
+        start_xy = (
+            (kp_world[start_idx][0], kp_world[start_idx][1])
+            if kp_world[start_idx] else None
+        )
+        end_xy = (
+            (kp_world[end_idx][0], kp_world[end_idx][1])
+            if kp_world[end_idx] else None
+        )
+        if ORIENTATION_MODES[name] == "direct":
+            theta = orientation_from_vector(start_xy, end_xy)
+        else:
+            theta = orientation_from_pair(start_xy, end_xy)
         orientations[name] = round(theta, 6) if theta is not None else None
 
     return {

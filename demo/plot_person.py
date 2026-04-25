@@ -364,17 +364,17 @@ def plot_single_frame(
     return out_path
 
 
-# COCO-17 left/right index pairs for the four body segments we visualize.
+# Conflab-17 keypoint pairs for the four body segments we visualize.
 KEYPOINT_PAIRS = {
-    "head":     (3, 4),    # left_ear, right_ear
-    "shoulder": (5, 6),    # left_shoulder, right_shoulder
-    "hip":      (11, 12),  # left_hip, right_hip
-    "foot":     (15, 16),  # left_ankle, right_ankle
+    "head":     (0, 1),    # head, nose
+    "shoulder": (6, 3),    # left_shoulder, right_shoulder
+    "hip":      (12, 9),   # left_hip, right_hip
+    "foot":     (16, 15),  # left_foot, right_foot
 }
 
 
 def _pixel_xy(raw_kps, kp_idx: int, conf_thresh: float = 0.0):
-    """Return ``(x, y)`` for a raw COCO keypoint if its confidence passes."""
+    """Return ``(x, y)`` for a raw Conflab keypoint if its confidence passes."""
     if raw_kps is None or len(raw_kps) <= kp_idx:
         return None
     kp = raw_kps[kp_idx]

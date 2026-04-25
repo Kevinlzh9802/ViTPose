@@ -17,7 +17,7 @@ Expected JSON schema:
         "annotations": {
             "<frame_id>": {
                 "keypoints": {
-                    "<person_id>": [[x, y, score], ... 17 COCO keypoints ...]
+                    "<person_id>": [[x, y, score], ... 17 Conflab keypoints ...]
                 }
             }
         }
@@ -75,41 +75,52 @@ CAMERA_PARAMS_ROOT = Path(
 KEYPOINT_IMAGE_SIZE = (960, 540)      # (width, height) of VitPose output
 INTRINSIC_IMAGE_SIZE = (1920, 1080)   # (width, height) at which K/D live
 
-# COCO-17 keypoint heights as a fraction of body height above the floor.
+# Conflab-17 keypoint heights as a fraction of body height above the floor.
+# This matches configs/_base_/datasets/conflab.py, which is the dataset_info
+# used by configs/ViTPose_coco_plus_conflab_w_bg_256x192.py.
 KP_HEIGHT_RATIOS = np.array([
-    0.95,   #  0 nose
-    0.97,   #  1 left_eye
-    0.97,   #  2 right_eye
-    0.95,   #  3 left_ear
-    0.95,   #  4 right_ear
-    0.85,   #  5 left_shoulder
-    0.85,   #  6 right_shoulder
+    1.00,   #  0 head
+    0.97,   #  1 nose
+    0.86,   #  2 neck
+    0.85,   #  3 right_shoulder
+    0.68,   #  4 right_elbow
+    0.55,   #  5 right_wrist
+    0.85,   #  6 left_shoulder
     0.68,   #  7 left_elbow
-    0.68,   #  8 right_elbow
-    0.55,   #  9 left_wrist
-    0.55,   # 10 right_wrist
-    0.50,   # 11 left_hip
-    0.50,   # 12 right_hip
+    0.55,   #  8 left_wrist
+    0.50,   #  9 right_hip
+    0.27,   # 10 right_knee
+    0.02,   # 11 right_ankle
+    0.50,   # 12 left_hip
     0.27,   # 13 left_knee
-    0.27,   # 14 right_knee
-    0.02,   # 15 left_ankle
-    0.02,   # 16 right_ankle
+    0.02,   # 14 left_ankle
+    0.00,   # 15 right_foot
+    0.00,   # 16 left_foot
 ], dtype=np.float64)
 
-# Orientation pairs: (left_idx, right_idx)
+# Orientation pairs in Conflab-17 index order.
+# The lateral segments use (left_idx, right_idx) and are rotated 90 degrees to
+# estimate heading. Head has no left/right pair in Conflab, so it uses the
+# direct head -> nose vector.
 ORIENTATION_PAIRS = {
-    "head": (3, 4),       # left_ear -> right_ear
-    "shoulder": (5, 6),   # left_shoulder -> right_shoulder
-    "hip": (11, 12),      # left_hip -> right_hip
-    "foot": (15, 16),     # left_ankle -> right_ankle
+    "head": (0, 1),       # head -> nose
+    "shoulder": (6, 3),   # left_shoulder -> right_shoulder
+    "hip": (12, 9),       # left_hip -> right_hip
+    "foot": (16, 15),     # left_foot -> right_foot
+}
+ORIENTATION_MODES = {
+    "head": "direct",
+    "shoulder": "lateral",
+    "hip": "lateral",
+    "foot": "lateral",
 }
 
 # Fallback keypoints used to recover an x/y center when the main pair is missing.
 SEGMENT_FALLBACKS = {
-    "head": [0, 1, 2, 3, 4],
-    "shoulder": [5, 6],
-    "hip": [11, 12],
-    "foot": [15, 16],
+    "head": [0, 1, 2],
+    "shoulder": [6, 3],
+    "hip": [12, 9],
+    "foot": [16, 15, 14, 11],
 }
 
 # --- Time-mapping and GT-group constants --------------------------------- #
@@ -276,7 +287,7 @@ def parse_camera_numbers(camera_numbers) -> set[str] | None:
 
 
 def orientation_from_pair(left_xy, right_xy) -> float | None:
-    """Heading angle in the image plane from a left/right keypoint pair."""
+    """Heading angle from a left/right keypoint pair."""
     if left_xy is None or right_xy is None:
         return None
 
@@ -287,6 +298,19 @@ def orientation_from_pair(left_xy, right_xy) -> float | None:
 
     # 90 deg CCW: (dx, dy) -> (-dy, dx)
     return math.atan2(dx, -dy)
+
+
+def orientation_from_vector(start_xy, end_xy) -> float | None:
+    """Angle of the direct vector from ``start_xy`` to ``end_xy``."""
+    if start_xy is None or end_xy is None:
+        return None
+
+    dx = end_xy[0] - start_xy[0]
+    dy = end_xy[1] - start_xy[1]
+    if dx == 0.0 and dy == 0.0:
+        return None
+
+    return math.atan2(dy, dx)
 
 
 DEFAULT_CAMERA_MODEL = "fisheye"  # "fisheye" (Kannala-Brandt) or "pinhole"
@@ -430,14 +454,17 @@ def segment_xy_and_orientation(kp_world: list, segment_name: str) -> tuple[float
     keypoints. Orientation is defined only when both paired keypoints are
     visible; otherwise NaN is stored.
     """
-    left_idx, right_idx = ORIENTATION_PAIRS[segment_name]
-    left_xy = valid_world_xy(kp_world, left_idx)
-    right_xy = valid_world_xy(kp_world, right_idx)
+    start_idx, end_idx = ORIENTATION_PAIRS[segment_name]
+    start_xy = valid_world_xy(kp_world, start_idx)
+    end_xy = valid_world_xy(kp_world, end_idx)
 
-    if left_xy is not None and right_xy is not None:
-        x = (left_xy[0] + right_xy[0]) / 2.0
-        y = (left_xy[1] + right_xy[1]) / 2.0
-        theta = orientation_from_pair(left_xy, right_xy)
+    if start_xy is not None and end_xy is not None:
+        x = (start_xy[0] + end_xy[0]) / 2.0
+        y = (start_xy[1] + end_xy[1]) / 2.0
+        if ORIENTATION_MODES[segment_name] == "direct":
+            theta = orientation_from_vector(start_xy, end_xy)
+        else:
+            theta = orientation_from_pair(start_xy, end_xy)
         return x, y, float(theta) if theta is not None else math.nan
 
     fallback_points = []
@@ -477,14 +504,14 @@ def project_person_keypoints_to_world(
     intrinsic_size: tuple[int, int] = INTRINSIC_IMAGE_SIZE,
     model: str = DEFAULT_CAMERA_MODEL,
 ) -> list:
-    """Project one person's 17 COCO keypoints to world coordinates.
+    """Project one person's 17 Conflab keypoints to world coordinates.
 
     ``raw_kps`` are expected in ``keypoint_size`` pixel coordinates; they are
     rescaled to ``intrinsic_size`` before being undistorted via the given
     camera ``model`` (fisheye or pinhole).
     """
     if len(raw_kps) != 17:
-        raise ValueError("Expected 17 COCO keypoints, got {}".format(len(raw_kps)))
+        raise ValueError("Expected 17 Conflab keypoints, got {}".format(len(raw_kps)))
 
     valid_idx = [i for i in range(17) if raw_kps[i][2] >= conf_thresh]
     kp_world = [None] * 17
@@ -521,7 +548,7 @@ def process_person_keypoints(
     model: str = DEFAULT_CAMERA_MODEL,
 ) -> dict[str, list]:
     """
-    Convert one person's 17 COCO keypoints into DANTE-style segment rows.
+    Convert one person's 17 Conflab keypoints into DANTE-style segment rows.
 
     Returns a dict mapping each segment name to:
         [person_id, x, y, orientation]
@@ -565,7 +592,7 @@ def process_vitpose_json(
         - group_ids
 
     When ``plot_frame_interval`` is set, for every Nth frame (by position, not
-    by id) the raw COCO keypoints and their back-projected world counterparts
+    by id) the raw Conflab keypoints and their back-projected world counterparts
     are captured in the returned ``plot_samples`` dict, keyed by the local frame
     id. The mapping has the shape::
 
