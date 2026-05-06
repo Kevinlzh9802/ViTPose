@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=00:30:00
+#SBATCH --time=00:20:00
 #SBATCH --mail-type=END
 #SBATCH --output=/home/nfs/zli33/slurm_outputs/vitpose-ingroup/blur_plot_slurm_%j.out
 #SBATCH --error=/home/nfs/zli33/slurm_outputs/vitpose-ingroup/blur_plot_slurm_%j.err
