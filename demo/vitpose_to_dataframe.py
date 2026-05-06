@@ -55,7 +55,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import pandas as pd
 
 
 BODY_HEIGHT = 1.7
@@ -211,6 +210,8 @@ def _normalize_time_key(raw: str) -> str:
 
 def _load_gt_groups(csv_path: str | Path) -> dict[str, str]:
     """Read a GT groups CSV and return {normalized_time_str: raw_groups_str}."""
+    import pandas as pd
+
     csv_path = Path(csv_path)
     if not csv_path.is_file():
         print(f"  Warning: GT groups CSV not found: {csv_path}")
@@ -599,6 +600,8 @@ def process_vitpose_json(
         {frame_id: {"raw": {track_id: 17x3 list},
                     "world": {track_id: 17-list of (x, y, z) | None}}}
     """
+    import pandas as pd
+
     input_path = Path(input_path)
     with open(input_path) as f:
         data = json.load(f)
