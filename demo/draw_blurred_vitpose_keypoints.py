@@ -299,8 +299,13 @@ def plot_blurred_keypoints(
     blur_kernel_size: int = 31,
     dpi: int = 100,
     keypoint_image_size: tuple[int, int] = KEYPOINT_IMAGE_SIZE,
-) -> Path:
-    fig, (ax_img, ax_world) = plt.subplots(1, 2, figsize=(16.0, 8.0), dpi=dpi)
+) -> tuple[Path, Path]:
+    out_path = Path(out_path)
+    left_path = out_path.with_name(f"{out_path.stem}_left{out_path.suffix}")
+    right_path = out_path.with_name(f"{out_path.stem}_right{out_path.suffix}")
+
+    fig_img, ax_img = plt.subplots(figsize=(8.0, 8.0), dpi=dpi)
+    fig_world, ax_world = plt.subplots(figsize=(8.0, 8.0), dpi=dpi)
 
     img = _load_image_rgb(image_path)
     img_scale_x = 1.0
@@ -383,36 +388,46 @@ def plot_blurred_keypoints(
     ax_world.set_xlabel("X (m)")
     ax_world.set_ylabel("Y (m)")
 
-    if legend_handles:
-        fig.legend(
-            handles=legend_handles,
-            loc="lower center",
-            ncol=min(8, max(1, len(legend_handles))),
-            frameon=True,
-            fontsize=8,
-            bbox_to_anchor=(0.5, 0.01),
-            title="Track id",
-            title_fontsize=9,
-        )
-
     extra = []
     if time_str:
         extra.append(time_str)
     if seg_info:
         extra.append(seg_info)
     extra_part = "  |  " + "  |  ".join(extra) if extra else ""
-    fig.suptitle(
-        f"{source_tag}  |  frame {frame_id}{extra_part}",
+    title = f"{source_tag}  |  frame {frame_id}{extra_part}"
+    fig_img.suptitle(
+        title,
+        fontsize=11,
+        y=0.98,
+    )
+    fig_world.suptitle(
+        title,
         fontsize=11,
         y=0.98,
     )
 
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout(rect=[0, 0.06, 1, 0.95])
-    fig.savefig(out_path)
-    plt.close(fig)
-    return out_path
+    if legend_handles:
+        for fig in (fig_img, fig_world):
+            fig.legend(
+                handles=legend_handles,
+                loc="lower center",
+                ncol=min(8, max(1, len(legend_handles))),
+                frameon=True,
+                fontsize=8,
+                bbox_to_anchor=(0.5, 0.01),
+                title="Track id",
+                title_fontsize=9,
+            )
+
+    left_path.parent.mkdir(parents=True, exist_ok=True)
+    right_path.parent.mkdir(parents=True, exist_ok=True)
+    fig_img.tight_layout(rect=[0, 0.06, 1, 0.95])
+    fig_world.tight_layout(rect=[0, 0.06, 1, 0.95])
+    fig_img.savefig(left_path)
+    fig_world.savefig(right_path)
+    plt.close(fig_img)
+    plt.close(fig_world)
+    return left_path, right_path
 
 
 def _project_frame_keypoints(
@@ -500,7 +515,7 @@ def process_results_directory(
         annotations = data.get("annotations", {})
         sorted_frame_ids = sorted(annotations.keys(), key=numeric_sort_key)
         selected = sorted_frame_ids[::plot_frame_interval]
-        print(f"    [plot] writing {len(selected)} blurred keypoint figures")
+        print(f"    [plot] writing {len(selected)} sampled frames (2 figures each)")
 
         for frame_id in selected:
             frame_data = annotations[frame_id]
