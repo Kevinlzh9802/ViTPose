@@ -56,6 +56,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from demo.extrinsic_loader import load_extrinsic
+
 
 BODY_HEIGHT = 1.7
 CONF_THRESHOLD = 0.0
@@ -376,8 +378,7 @@ def load_camera_params(
 
     with open(intrinsic_path) as f:
         intrinsic_data = json.load(f)
-    with open(extrinsic_path) as f:
-        extrinsic_data = json.load(f)
+    rvec, tvec = load_extrinsic(extrinsic_path)
 
     model = str(intrinsic_data.get("model", DEFAULT_CAMERA_MODEL)).lower()
     if model not in {"fisheye", "pinhole"}:
@@ -392,8 +393,8 @@ def load_camera_params(
         "D": normalize_distortion_coefficients(
             intrinsic_data["distortion_coefficients"], model=model
         ),
-        "rvec": np.asarray(extrinsic_data["rvec"], dtype=np.float64).reshape(3, 1),
-        "tvec": np.asarray(extrinsic_data["tvec"], dtype=np.float64).reshape(3, 1),
+        "rvec": rvec,
+        "tvec": tvec,
     }
     _camera_params_cache[cache_key] = params
     return params
