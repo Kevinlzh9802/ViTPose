@@ -21,7 +21,7 @@ SIF="${SIF:-${NEON}/apptainer/vitpose-0.0.5.sif}"
 # ---------------------------------------------------------------------------
 # Camera mapping: first digit of each batch number → camera digit X
 #   intrinsic: /neon/zonghuan/data/conflab/intrinsics/intrinsic_X.json
-#   extrinsic: EXTRINSICS_DIR/extrinsic_X_zh.json
+#   extrinsic: EXTRINSICS_DIR/extrinsic_zh_X.json
 #
 # Note: conflab extrinsics are in centimetres, so body_height is passed as
 # 170 (cm) instead of the default 1.7 (m) used for the ingroup dataset.
@@ -63,10 +63,24 @@ done
 # Fall back to BATCH env var for single-batch backwards compatibility.
 if [[ -z "${BATCHES_RAW}" ]]; then
     if [[ -z "${BATCH:-}" ]]; then
-        echo "Error: specify batches via --batch=228,229 or the BATCH env var" >&2
+        echo "Error: specify batches via --batch=228,229, --batch=all, or the BATCH env var" >&2
         exit 1
     fi
     BATCHES_RAW="${BATCH}"
+fi
+
+# Expand "all" to every batch directory that already has a keypoints JSON.
+if [[ "${BATCHES_RAW}" == "all" ]]; then
+    found=()
+    while IFS= read -r json; do
+        found+=("$(basename "$(dirname "${json}")")")
+    done < <(find "${VITPOSE_OUTPUTS}" -maxdepth 2 -name 'vitpose_keypoints.json' | sort)
+    if [[ ${#found[@]} -eq 0 ]]; then
+        echo "Error: no vitpose_keypoints.json found under ${VITPOSE_OUTPUTS}" >&2
+        exit 1
+    fi
+    BATCHES_RAW=$(IFS=','; echo "${found[*]}")
+    echo "  --batch=all expanded to: ${BATCHES_RAW}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -177,13 +191,16 @@ echo "Dataframes written under ${OUTPUT_ROOT}"
 # 2) Multiple batches in one job:
 #    sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228,229,431
 #
-# 3) With diagnostic plots:
+# 3) All available batches (scans vitpose_outputs/ for existing JSONs):
+#    sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=all
+#
+# 4) With diagnostic plots:
 #    sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228,229 --plot_dir=/path/to/plots
 #
-# 4) Override output root or extrinsics location:
+# 5) Override output root or extrinsics location:
 #    OUTPUT_ROOT=/custom/output sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228
 #    EXTRINSICS_DIR=/alt/extrinsics sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228
 #
-# 5) Backwards-compatible single-batch via env var:
+# 6) Backwards-compatible single-batch via env var:
 #    BATCH=228 sbatch slurm/conflab_vitpose_dataframe_daic.sh
 # ---------------------------------------------------------------------------
