@@ -101,7 +101,7 @@ for BATCH in "${BATCH_LIST[@]}"; do
 
     SOURCE_JSON="${VITPOSE_OUTPUTS}/${BATCH}/vitpose_keypoints.json"
     INTRINSIC_FILE="${CONFLAB_INTRINSICS_DIR}/intrinsic_${CAM_DIGIT}.json"
-    EXTRINSIC_FILE="${EXTRINSICS_DIR}/extrinsic_${CAM_DIGIT}_zh.json"
+    EXTRINSIC_FILE="${EXTRINSICS_DIR}/extrinsic_zh_${CAM_DIGIT}.json"
 
     if [[ ! -f "${SOURCE_JSON}" ]]; then
         echo "Error: source JSON not found: ${SOURCE_JSON}" >&2; exit 1
