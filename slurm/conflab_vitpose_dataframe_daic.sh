@@ -33,13 +33,14 @@ BODY_HEIGHT=170
 
 VITPOSE_OUTPUTS="${NEON}/zonghuan/data/conflab/vitpose_outputs"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${NEON}/zonghuan/data/conflab/vitpose_dataframe}"
+PLOT_DIR="${PLOT_DIR:-${OUTPUT_ROOT}}"
+FRAMES_ROOT="${FRAMES_ROOT:-${NEON}/zonghuan/data/conflab/bbox_kp}"
+PLOT_FRAME_INTERVAL="${PLOT_FRAME_INTERVAL:-300}"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 BATCHES_RAW=""
-PLOT_DIR=""
-FRAMES_ROOT=""
 
 for arg in "$@"; do
     case "$arg" in
@@ -52,9 +53,12 @@ for arg in "$@"; do
         --frames_root=*)
             FRAMES_ROOT="${arg#--frames_root=}"
             ;;
+        --plot_frame_interval=*)
+            PLOT_FRAME_INTERVAL="${arg#--plot_frame_interval=}"
+            ;;
         *)
             echo "Error: unknown argument '$arg'" >&2
-            echo "Usage: sbatch $0 --batch=228,229,431 [--plot_dir=/path] [--frames_root=/path]" >&2
+            echo "Usage: sbatch $0 --batch=228,229,431 [--plot_dir=/path] [--frames_root=/path] [--plot_frame_interval=300]" >&2
             exit 1
             ;;
     esac
@@ -140,6 +144,18 @@ for BATCH in "${BATCH_LIST[@]}"; do
         ln -s "${INTRINSIC_FILE}" "${TEMP_CAM_PARAMS}/intrinsic.json"
         ln -s "${EXTRINSIC_FILE}" "${TEMP_CAM_PARAMS}/extrinsic.json"
     fi
+
+    # Ensure frame images are available for the keypoint overlay plots.
+    FRAMES_BATCH_DIR="${FRAMES_ROOT}/${BATCH}"
+    if [[ ! -d "${FRAMES_BATCH_DIR}/images" ]]; then
+        IMAGES_ZIP="${FRAMES_BATCH_DIR}/images.zip"
+        if [[ -f "${IMAGES_ZIP}" ]]; then
+            echo "  Unzipping frames for batch ${BATCH}: ${IMAGES_ZIP}"
+            unzip -q "${IMAGES_ZIP}" -d "${FRAMES_BATCH_DIR}"
+        else
+            echo "  Warning: ${FRAMES_BATCH_DIR}/images/ not found and no images.zip present — keypoint overlay plots will have blank left panels" >&2
+        fi
+    fi
 done
 
 python_args=(
@@ -148,14 +164,11 @@ python_args=(
     --output_name vitpose_dataframe.pkl
     --camera_params_root "${TEMP_DIR}/camera_params"
     --body_height "${BODY_HEIGHT}"
+    --plot_dir "${PLOT_DIR}"
+    --frames_root "${FRAMES_ROOT}"
+    --frames_layout conflab
+    --plot_frame_interval "${PLOT_FRAME_INTERVAL}"
 )
-
-if [[ -n "${PLOT_DIR}" ]]; then
-    python_args+=(--plot_dir "${PLOT_DIR}")
-fi
-if [[ -n "${FRAMES_ROOT}" ]]; then
-    python_args+=(--frames_root "${FRAMES_ROOT}")
-fi
 
 apptainer exec \
     --containall \
@@ -194,13 +207,16 @@ echo "Dataframes written under ${OUTPUT_ROOT}"
 # 3) All available batches (scans vitpose_outputs/ for existing JSONs):
 #    sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=all
 #
-# 4) With diagnostic plots:
-#    sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228,229 --plot_dir=/path/to/plots
+# 4) Override plot output location (default: same as OUTPUT_ROOT):
+#    sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228 --plot_dir=/custom/plots
 #
-# 5) Override output root or extrinsics location:
+# 5) Change plot frequency (default: every 300 frames = 5 s at 60 fps):
+#    sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228 --plot_frame_interval=600
+#
+# 6) Override output root or extrinsics location:
 #    OUTPUT_ROOT=/custom/output sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228
 #    EXTRINSICS_DIR=/alt/extrinsics sbatch slurm/conflab_vitpose_dataframe_daic.sh --batch=228
 #
-# 6) Backwards-compatible single-batch via env var:
+# 7) Backwards-compatible single-batch via env var:
 #    BATCH=228 sbatch slurm/conflab_vitpose_dataframe_daic.sh
 # ---------------------------------------------------------------------------

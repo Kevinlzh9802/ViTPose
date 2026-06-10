@@ -750,6 +750,19 @@ def _seg_frame_image_path(
     )
 
 
+def _conflab_frame_image_path(
+    frames_root: Path | None, batch_number: int | None, frame_id: str
+) -> Path | None:
+    """Build ``<frames_root>/<batch_number>/images/<frame_id:08d>.jpg``.
+
+    Matches the layout written by ``infer_mask_bbox.py`` for the conflab dataset,
+    where each batch's images live under ``bbox_kp/<BATCH>/images/``.
+    """
+    if frames_root is None or batch_number is None:
+        return None
+    return Path(frames_root) / str(batch_number) / "images" / f"{int(frame_id):08d}.jpg"
+
+
 def _render_position_plots(
     df: pd.DataFrame,
     cam_number: str,
@@ -822,6 +835,7 @@ def _render_keypoints_plots(
     cam_plot_dir: Path,
     frames_root: Path | None,
     shared_bounds_override: tuple[float, float, float, float] | None = None,
+    frames_layout: str = "ingroup",
 ) -> None:
     """Render per-sample combined keypoint figures (pixel + bird's-eye)."""
     from demo.plot_person import (
@@ -847,7 +861,10 @@ def _render_keypoints_plots(
             local_frame = 0
         global_frame = _global_frame_index(batch_number, local_frame)
         seg_num, seg_local = _seg_info_for_global_frame(global_frame)
-        image_path = _seg_frame_image_path(frames_root, cam_number, seg_num)
+        if frames_layout == "conflab":
+            image_path = _conflab_frame_image_path(frames_root, batch_number, frame_id)
+        else:
+            image_path = _seg_frame_image_path(frames_root, cam_number, seg_num)
 
         time_str = ""
         if frame_id in df.index:
@@ -891,6 +908,7 @@ def process_results_directory(
     plot_dir: str | Path | None = None,
     frames_root: str | Path | None = None,
     plot_frame_interval: int = PLOT_FRAME_INTERVAL,
+    frames_layout: str = "ingroup",
 ) -> None:
     """
     Walk every cam*/vitpose_keypoints.json under results_dir and write a
@@ -1006,6 +1024,7 @@ def process_results_directory(
                 cam_plot_dir=cam_plot_dir,
                 frames_root=frames_root,
                 shared_bounds_override=bev_bounds,
+                frames_layout=frames_layout,
             )
 
 
@@ -1088,6 +1107,16 @@ def parse_args():
             f"{PLOT_FRAME_INTERVAL} = every 20 s at 60 fps)."
         ),
     )
+    parser.add_argument(
+        "--frames_layout",
+        default="ingroup",
+        choices=["ingroup", "conflab"],
+        help=(
+            "Frame image directory layout for keypoint overlay plots. "
+            "'ingroup': cam<XX>/cam<XX>_seg<YYY>_frame0.jpg; "
+            "'conflab': <batch>/images/{frame_id:08d}.jpg (default: ingroup)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1105,4 +1134,5 @@ if __name__ == "__main__":
         plot_dir=args.plot_dir,
         frames_root=args.frames_root,
         plot_frame_interval=args.plot_frame_interval,
+        frames_layout=args.frames_layout,
     )
