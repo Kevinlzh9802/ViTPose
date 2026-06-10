@@ -170,11 +170,7 @@ BEV_HALF_WIDTH_XY = (4.0, 3.0)
 #
 # Both the saved pkl's ``spaceFeat`` columns and all BEV plots use this rotated
 # frame.
-WORLD_REORIENTATION_2D = np.array(
-    [[ 0.0, -1.0],
-     [ 1.0,  0.0]],
-    dtype=np.float64,
-)
+WORLD_REORIENTATION_2D = np.eye(2, dtype=np.float64)  # no reorientation applied
 
 
 def apply_world_reorientation_xy(x: float, y: float) -> tuple[float, float]:
