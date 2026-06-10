@@ -25,7 +25,7 @@ POSE_CKPT="${POSE_CKPT:-${NEON}/code/ViTPose/work_dirs/ViTPose_coco_plus_conflab
 
 # ---------------------------------------------------------------------------
 # Batch to run inference on — override by setting BATCH before sbatch, e.g.:
-#   BATCH=228 sbatch slurm/submit_infer_daic.sh
+#   BATCH=228 sbatch slurm/conflab_daic.sh
 # ---------------------------------------------------------------------------
 BATCH="${BATCH:-228}"
 DATA_ROOT="${DATA_ROOT:-${NEON}/zonghuan/data/conflab/bbox_kp/${BATCH}}"
@@ -43,7 +43,7 @@ OUT_DIR=${NEON}/zonghuan/data/conflab/vitpose_outputs/${BATCH}
 mkdir -p ${OUT_DIR}
 
 # Unzip images to /tmp — zip contains flat jpgs (no images/ subfolder)
-IMG_DIR=/tmp/ingroup_images/${BATCH}
+IMG_DIR=/tmp/conflab_images/${BATCH}
 mkdir -p ${IMG_DIR}
 
 if [ -f "${DATA_ROOT}/images.zip" ]; then
@@ -74,22 +74,30 @@ apptainer exec \
     --save-video
 
 # Clean up /tmp
-rm -rf /tmp/ingroup_images/${BATCH}
+rm -rf /tmp/conflab_images/${BATCH}
 
 echo "Results saved to ${OUT_DIR}/vitpose_keypoints.json"
 
 # ---------------------------------------------------------------------------
 # Usage examples:
 #
-# 1) Default batch (cam06_batch01):
-#    sbatch slurm/submit_infer_daic.sh
+# BATCH is a 3-digit number whose first digit maps to the camera:
+#   2xx → camera 02,  4xx → camera 04,  6xx → camera 06, etc.
+# Data is read from:  bbox_kp/<BATCH>/  (images.zip or images/)
+# Output written to:  vitpose_outputs/<BATCH>/vitpose_keypoints.json
+#
+# 1) Default batch (228):
+#    sbatch slurm/conflab_daic.sh
 #
 # 2) Specific batch:
-#    BATCH=cam06_batch02 sbatch slurm/submit_infer_daic.sh
+#    BATCH=431 sbatch slurm/conflab_daic.sh
 #
-# 3) All batches:
-#    for b in cam06_batch01 cam06_batch02 cam06_batch03 cam06_batch04 cam06_batch05 \
-#             cam06_batch06 cam06_batch07 cam08_batch01 cam08_batch02 cam08_batch03 \
-#             cam08_batch04 cam08_batch05 cam08_batch06 cam10_batch01 cam10_batch02 \
-#             cam10_batch03; do BATCH=$b sbatch slurm/submit_infer_daic.sh; done
+# 3) Multiple batches (one job per batch):
+#    for b in 228 229 431 628; do BATCH=$b sbatch slurm/conflab_daic.sh; done
+#
+# 4) Custom checkpoint:
+#    POSE_CKPT=/path/to/checkpoint.pth BATCH=228 sbatch slurm/conflab_daic.sh
+#
+# 5) Custom data or output root:
+#    DATA_ROOT=/alt/bbox_kp/228 sbatch slurm/conflab_daic.sh
 # ---------------------------------------------------------------------------
