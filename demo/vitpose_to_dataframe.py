@@ -798,21 +798,19 @@ def _render_position_plots(
             local_frame = int(frame_id)
         except (ValueError, TypeError):
             local_frame = 0
-        global_frame = _global_frame_index(batch_number, local_frame)
         out_path = (
             cam_plot_dir
-            / f"{cam_tag}__position_frame_{global_frame:07d}.png"
+            / f"{cam_tag}__position_frame_{local_frame:08d}.png"
         )
 
         groups = row.get("groups") if "groups" in row.index else None
         time_str = row.get("time", "") if "time" in row.index else ""
         batch_part = (
-            f"batch{batch_number:02d}" if batch_number is not None else "batch??"
+            f"batch{batch_number}" if batch_number is not None else "batch??"
         )
         time_part = f"  |  {time_str}" if time_str else ""
         title = (
-            f"{cam_tag}  |  {batch_part}  |  global frame {global_frame}"
-            f"  (local {local_frame}){time_part}"
+            f"{cam_tag}  |  {batch_part}  |  frame {local_frame:08d}{time_part}"
         )
         plot_single_frame(
             frame_id=str(frame_id),
@@ -875,13 +873,13 @@ def _render_keypoints_plots(
 
         out_path = (
             cam_plot_dir
-            / f"{cam_tag}__keypoints_frame_{global_frame:07d}.png"
+            / f"{cam_tag}__keypoints_frame_{local_frame:08d}.png"
         )
         seg_info = f"seg{seg_num:03d} (offset {seg_local} frames)"
         batch_part = (
-            f"batch{batch_number:02d}" if batch_number is not None else "batch??"
+            f"batch{batch_number}" if batch_number is not None else "batch??"
         )
-        source_tag = f"{cam_tag}  |  {batch_part}  |  global frame {global_frame}"
+        source_tag = f"{cam_tag}  |  {batch_part}  |  frame {local_frame:08d}"
         plot_keypoints_subplots(
             frame_id=str(frame_id),
             raw_by_track=sample["raw"],
@@ -981,8 +979,11 @@ def process_results_directory(
             plot_frame_interval=plot_frame_interval if plot_dir is not None else None,
         )
 
+        # Use bare batch number as folder name when available (e.g. "228"),
+        # otherwise fall back to the cam-named folder (e.g. "cam02_batch228").
+        batch_folder = str(batch_num) if batch_num is not None else cam_name
         if output_dir is not None:
-            out_path = output_dir / cam_name / output_name
+            out_path = output_dir / batch_folder / output_name
             out_path.parent.mkdir(parents=True, exist_ok=True)
         else:
             out_path = json_file.parent / output_name
@@ -991,7 +992,7 @@ def process_results_directory(
         print(f"    -> {out_path}")
 
         if plot_dir is not None:
-            cam_plot_dir = Path(plot_dir) / f"cam{cam_number}"
+            cam_plot_dir = Path(plot_dir) / batch_folder
             cam_plot_dir.mkdir(parents=True, exist_ok=True)
 
             cam_params = load_camera_params(
