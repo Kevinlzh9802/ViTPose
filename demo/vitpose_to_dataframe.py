@@ -144,18 +144,35 @@ PLOT_FRAME_INTERVAL = 1200  # every 20 s at 60 fps
 BEV_HALF_WIDTH_XY = (4.0, 3.0)
 
 # 2D rotation applied to every back-projected world (X, Y) BEFORE it enters the
-# dataframe / BEV plot. The current matrix corresponds to a 90 degrees CW
-# rotation of the world plane (equivalently, a 90 degrees CCW rotation of the
-# displayed image):
+# dataframe / BEV plot.
 #
-#     plot_x  =  +world_Y
-#     plot_y  =  -world_X
+# The conflab camera coordinate system produces back-projected floor points where
+# the raw X and Y axes are misaligned with the intended top-down view: Y values
+# come out negative and the X/Y axes are transposed relative to the expected
+# orientation.  The correction is applied in two steps:
+#
+#   Step 1 — negate Y:    (X,  Y) → (X, -Y)
+#   Step 2 — swap X ↔ Y: (X, -Y) → (-Y, X)
+#
+# Combined, this is a 90° CCW rotation of the world plane:
+#
+#     plot_x  =  -world_Y
+#     plot_y  =  +world_X
+#
+# Matrix form:
+#   [[0, -1],   [X]   =   [-Y]
+#    [1,  0]] × [Y]         [X]
+#
+# NOTE: the root cause is likely the camera extrinsic convention (rotation
+# matrix sign / axis ordering). If the extrinsics are ever corrected upstream,
+# this matrix should be revisited — set it to np.eye(2) to disable the
+# reorientation and inspect the raw back-projected coordinates.
 #
 # Both the saved pkl's ``spaceFeat`` columns and all BEV plots use this rotated
-# frame; set ``WORLD_REORIENTATION_2D = np.eye(2)`` to disable.
+# frame.
 WORLD_REORIENTATION_2D = np.array(
-    [[ 0.0, 1.0],
-     [-1.0, 0.0]],
+    [[ 0.0, -1.0],
+     [ 1.0,  0.0]],
     dtype=np.float64,
 )
 
