@@ -146,12 +146,14 @@ for BATCH in "${BATCH_LIST[@]}"; do
     fi
 
     # Ensure frame images are available for the keypoint overlay plots.
+    # Only unzip when images/ does not yet exist to avoid repeated work.
     FRAMES_BATCH_DIR="${FRAMES_ROOT}/${BATCH}"
     if [[ ! -d "${FRAMES_BATCH_DIR}/images" ]]; then
         IMAGES_ZIP="${FRAMES_BATCH_DIR}/images.zip"
         if [[ -f "${IMAGES_ZIP}" ]]; then
             echo "  Unzipping frames for batch ${BATCH}: ${IMAGES_ZIP}"
-            unzip -q "${IMAGES_ZIP}" -d "${FRAMES_BATCH_DIR}"
+            mkdir -p "${FRAMES_BATCH_DIR}/images"
+            unzip -q "${IMAGES_ZIP}" -d "${FRAMES_BATCH_DIR}/images"
         else
             echo "  Warning: ${FRAMES_BATCH_DIR}/images/ not found and no images.zip present — keypoint overlay plots will have blank left panels" >&2
         fi
