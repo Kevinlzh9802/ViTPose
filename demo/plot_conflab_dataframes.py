@@ -104,10 +104,24 @@ def process(
     print(f"  frame_interval={frame_interval}")
 
     total_written = 0
+    skipped = []
     for batch_name, pkl_path in batch_dirs:
         print(f"\n  [{batch_name}] loading {pkl_path}")
-        df = pd.read_pickle(pkl_path)
-        df_m = _scale_spacefeat_df(df, factor=_CM_TO_M)
+        try:
+            df = pd.read_pickle(pkl_path)
+            if "spaceFeat" not in df.columns:
+                print(
+                    f"  Warning: [{batch_name}] pkl has no 'spaceFeat' column "
+                    f"(columns={list(df.columns)}, rows={len(df)}). "
+                    "This usually means the batch produced zero detections. Skipping."
+                )
+                skipped.append(batch_name)
+                continue
+            df_m = _scale_spacefeat_df(df, factor=_CM_TO_M)
+        except Exception as exc:
+            print(f"  Warning: [{batch_name}] failed to load/process pkl: {exc}. Skipping.")
+            skipped.append(batch_name)
+            continue
 
         batch_out_dir = output_root / batch_name
         batch_out_dir.mkdir(parents=True, exist_ok=True)
@@ -120,6 +134,8 @@ def process(
         )
         total_written += n
 
+    if skipped:
+        print(f"\nSkipped {len(skipped)} batch(es) due to errors: {skipped}")
     print(f"\nDone. Total plots written: {total_written}")
 
 
