@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=2:00:00
+#SBATCH --time=0:40:00
 #SBATCH --mail-type=END
 #SBATCH --output=/home/nfs/zli33/slurm_outputs/vitpose-conflab/df_slurm_%j.out
 #SBATCH --error=/home/nfs/zli33/slurm_outputs/vitpose-conflab/df_slurm_%j.err
