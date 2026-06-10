@@ -800,7 +800,7 @@ def _render_position_plots(
             local_frame = 0
         out_path = (
             cam_plot_dir
-            / f"{cam_tag}__position_frame_{local_frame:08d}.png"
+            / f"{cam_tag}_position_frame_{local_frame:08d}.png"
         )
 
         groups = row.get("groups") if "groups" in row.index else None
@@ -834,6 +834,7 @@ def _render_keypoints_plots(
     frames_root: Path | None,
     shared_bounds_override: tuple[float, float, float, float] | None = None,
     frames_layout: str = "ingroup",
+    world_scale: float = 1.0,
 ) -> None:
     """Render per-sample combined keypoint figures (pixel + bird's-eye)."""
     from demo.plot_person import (
@@ -873,17 +874,30 @@ def _render_keypoints_plots(
 
         out_path = (
             cam_plot_dir
-            / f"{cam_tag}__keypoints_frame_{local_frame:08d}.png"
+            / f"{cam_tag}_keypoints_frame_{local_frame:08d}.png"
         )
         seg_info = f"seg{seg_num:03d} (offset {seg_local} frames)"
         batch_part = (
             f"batch{batch_number}" if batch_number is not None else "batch??"
         )
         source_tag = f"{cam_tag}  |  {batch_part}  |  frame {local_frame:08d}"
+
+        # Scale world keypoints (e.g. cm → m) if requested.
+        world_by_track = sample["world"]
+        if world_scale != 1.0:
+            world_by_track = {
+                tid: [
+                    [v * world_scale for v in kp] if kp is not None else None
+                    for kp in kps
+                ]
+                if kps is not None else None
+                for tid, kps in world_by_track.items()
+            }
+
         plot_keypoints_subplots(
             frame_id=str(frame_id),
             raw_by_track=sample["raw"],
-            world_by_track=sample["world"],
+            world_by_track=world_by_track,
             image_path=image_path,
             out_path=out_path,
             source_tag=source_tag,
@@ -998,25 +1012,22 @@ def process_results_directory(
             cam_params = load_camera_params(
                 cam_number, camera_params_root=camera_params_root
             )
+            # Conflab extrinsics are in cm; convert camera position to metres
+            # so that BEV bounds and world keypoint coords share the same scale.
+            world_scale = 0.01 if frames_layout == "conflab" else 1.0
             cam_world_xy = _camera_center_world_xy(
                 cam_params["rvec"], cam_params["tvec"]
             )
-            bev_bounds = _bev_bounds_around(cam_world_xy)
+            cam_world_xy_m = (cam_world_xy[0] * world_scale,
+                              cam_world_xy[1] * world_scale)
+            bev_bounds = _bev_bounds_around(cam_world_xy_m)
             print(
                 f"    [plot] bird's-eye window centred on camera "
-                f"(X={cam_world_xy[0]:.2f} m, Y={cam_world_xy[1]:.2f} m) "
+                f"(X={cam_world_xy_m[0]:.2f} m, Y={cam_world_xy_m[1]:.2f} m) "
                 f"-> X in [{bev_bounds[0]:.2f}, {bev_bounds[1]:.2f}], "
                 f"Y in [{bev_bounds[2]:.2f}, {bev_bounds[3]:.2f}]"
             )
 
-            _render_position_plots(
-                df=df,
-                cam_number=cam_number,
-                batch_number=batch_num,
-                cam_plot_dir=cam_plot_dir,
-                frame_interval=plot_frame_interval,
-                shared_bounds_override=bev_bounds,
-            )
             _render_keypoints_plots(
                 df=df,
                 plot_samples=plot_samples,
@@ -1026,6 +1037,7 @@ def process_results_directory(
                 frames_root=frames_root,
                 shared_bounds_override=bev_bounds,
                 frames_layout=frames_layout,
+                world_scale=world_scale,
             )
 
 
