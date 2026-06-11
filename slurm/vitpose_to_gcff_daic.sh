@@ -52,8 +52,6 @@ echo "  output=${OUTPUT}"
 echo "  batches=${BATCHES_RAW}"
 echo "  world_scale=${WORLD_SCALE}"
 
-mkdir -p "$(dirname "${OUTPUT}")"
-
 apptainer exec \
     --containall \
     --env PYTHONPATH=${VITPOSE_DIR} \
