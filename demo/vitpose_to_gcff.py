@@ -2,7 +2,7 @@
 vitpose_to_gcff.py
 
 Convert per-batch ViTPose dataframe pickles into a single GCFF-compatible
-DataFrame and save it as data_vitpose.pkl.
+DataFrame and save it as data.pkl.
 
 Batch numbering convention: <Cam><Vid><Seg>  (3 digits)
   228  →  Cam=2, Vid=2, Seg=8
@@ -48,7 +48,7 @@ import pandas as pd
 
 NEON = "/tudelft.net/staff-umbrella/neon"
 DEFAULT_VITPOSE_ROOT = f"{NEON}/zonghuan/data/conflab/vitpose_dataframe"
-DEFAULT_OUTPUT = f"{NEON}/zonghuan/data/conflab/GCFF/data_vitpose.pkl"
+DEFAULT_OUTPUT = f"{NEON}/zonghuan/data/conflab/GCFF/data.pkl"
 
 CLUES = ["head", "shoulder", "hip", "foot"]
 
@@ -263,7 +263,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         default=DEFAULT_OUTPUT,
-        help=f"Output path for data_vitpose.pkl (default: {DEFAULT_OUTPUT}).",
+        help=f"Output path for data.pkl (default: {DEFAULT_OUTPUT}).",
     )
     parser.add_argument(
         "--batch",

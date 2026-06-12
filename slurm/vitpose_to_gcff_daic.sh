@@ -19,7 +19,7 @@ VITPOSE_DIR=/home/nfs/zli33/projects/ViTPose
 SIF="${SIF:-${NEON}/apptainer/vitpose-0.0.5.sif}"
 
 VITPOSE_ROOT="${VITPOSE_ROOT:-${NEON}/zonghuan/data/conflab/vitpose_dataframe}"
-OUTPUT="${OUTPUT:-${NEON}/zonghuan/data/conflab/GCFF/data_vitpose.pkl}"
+OUTPUT="${OUTPUT:-${NEON}/zonghuan/data/conflab/GCFF/data.pkl}"
 WORLD_SCALE="${WORLD_SCALE:-0.01}"
 
 # ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ for arg in "$@"; do
             ;;
         *)
             echo "Error: unknown argument '$arg'" >&2
-            echo "Usage: sbatch $0 [--batch=228,229] [--output=/path/data_vitpose.pkl] [--world_scale=0.01]" >&2
+            echo "Usage: sbatch $0 [--batch=228,229] [--output=/path/data.pkl] [--world_scale=0.01]" >&2
             exit 1
             ;;
     esac
@@ -69,10 +69,9 @@ echo "Saved: ${OUTPUT}"
 # ---------------------------------------------------------------------------
 # Notes:
 #
-# Output: data_vitpose.pkl — merged GCFF-schema DataFrame, no GCFF detections.
+# Output: data.pkl — merged GCFF-schema DataFrame, no GCFF detections.
 # Then run GCFF on it:
-#   sbatch FF_conflab/slurm/submit_gcff_cluster.sh \
-#          --config python/configs/config_GCFF_cluster_vitpose.yaml
+#   sbatch FF_conflab/slurm/submit_gcff_vitpose.sh --mode=gcff
 #
 # world_scale=0.01 converts ViTPose cm coords → metres (GCFF default param scale).
 # If GCFF params were tuned on cm-scale data, pass --world_scale=1.0.
@@ -89,5 +88,5 @@ echo "Saved: ${OUTPUT}"
 #    sbatch slurm/vitpose_to_gcff_daic.sh --world_scale=1.0
 #
 # 4) Override paths:
-#    OUTPUT=/custom/path/data_vitpose.pkl sbatch slurm/vitpose_to_gcff_daic.sh
+#    OUTPUT=/custom/path/data.pkl sbatch slurm/vitpose_to_gcff_daic.sh
 # ---------------------------------------------------------------------------
