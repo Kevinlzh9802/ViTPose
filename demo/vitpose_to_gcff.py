@@ -80,6 +80,24 @@ def _normalise_spacefeat(sf: dict, world_scale: float) -> dict:
     return out
 
 
+def _normalise_pixelcoords(pc: dict | None) -> dict | None:
+    """Convert object-dtype per-clue pixel arrays to float64.
+
+    No coordinate scaling — pixel coords are already in absolute intrinsic
+    resolution (1920×1080) and need no unit conversion.
+    """
+    if pc is None:
+        return None
+    out = {}
+    for clue in CLUES:
+        arr = pc.get(clue)
+        if arr is None or (hasattr(arr, "__len__") and len(arr) == 0):
+            out[clue] = np.empty((0, 4), dtype=np.float64)
+            continue
+        out[clue] = np.asarray(arr, dtype=np.float64)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # concat_ts construction
 # ---------------------------------------------------------------------------
@@ -177,24 +195,8 @@ def convert(
         vid = int(str(batch)[1])
         seg = int(str(batch)[2])
 
-        new_df = pd.DataFrame()
-        new_df["Cam"] = cam
-        new_df["Vid"] = vid
-        new_df["Seg"] = seg
-        # 0-based row position within this batch as Timestamp
-        new_df["Timestamp"] = list(range(len(df)))
-        # Normalise spaceFeat: object→float64, scale x/y
-        new_df["spaceFeat"] = [
-            _normalise_spacefeat(row["spaceFeat"], world_scale)
-            for _, row in df.iterrows()
-        ]
-        # Columns unavailable from ViTPose — filled with empty/null values
-        new_df["pixelFeat"] = [{} for _ in range(len(df))]
-        new_df["pixelCoords"] = [None] * len(df)
-        new_df["spaceCoords"] = [None] * len(df)
-        new_df["GT"] = [[] for _ in range(len(df))]
-
-        # Broadcast scalar columns
+        has_pixel = "pixelCoords" in df.columns
+        rows_list = list(df.iterrows())
         new_df = pd.DataFrame({
             "Cam":        [cam] * len(df),
             "Vid":        [vid] * len(df),
@@ -202,10 +204,13 @@ def convert(
             "Timestamp":  list(range(len(df))),
             "spaceFeat":  [
                 _normalise_spacefeat(row["spaceFeat"], world_scale)
-                for _, row in df.iterrows()
+                for _, row in rows_list
             ],
             "pixelFeat":  [{} for _ in range(len(df))],
-            "pixelCoords": [None] * len(df),
+            "pixelCoords": [
+                _normalise_pixelcoords(row["pixelCoords"]) if has_pixel else None
+                for _, row in rows_list
+            ],
             "spaceCoords": [None] * len(df),
             "GT":          [[] for _ in range(len(df))],
         })

@@ -29,12 +29,18 @@ For each camera folder, the script writes a pickled dataframe. Each dataframe
 row represents one timestamp/frame and contains:
 
     - timestamp: frame id
-    - spaceFeat: dict with keys {head, shoulder, hip, foot}
+    - spaceFeat:   dict with keys {head, shoulder, hip, foot}
+    - pixelCoords: dict with keys {head, shoulder, hip, foot}
     - groups: empty list placeholder
     - group_ids: empty list placeholder
 
 Each spaceFeat entry is an (n_people, 4) object array containing:
     [person_id, x, y, orientation]
+
+Each pixelCoords entry is an (n_people, 4) object array containing:
+    [person_id, u, v, orientation]
+where (u, v) are absolute pixel coordinates at intrinsic resolution (1920×1080)
+and orientation is computed from the same keypoint pairs in pixel space.
 
 The saved x/y values are world-floor coordinates obtained by back-projecting
 the 2D keypoints with per-camera intrinsic/extrinsic calibration loaded from:
@@ -496,6 +502,53 @@ def segment_xy_and_orientation(kp_world: list, segment_name: str) -> tuple[float
     return math.nan, math.nan, math.nan
 
 
+def segment_xy_and_orientation_pixel(
+    raw_kps: list,
+    segment_name: str,
+    sx: float,
+    sy: float,
+    conf_thresh: float,
+) -> tuple[float, float, float]:
+    """Compute segment position and orientation in absolute pixel coordinates.
+
+    Mirrors segment_xy_and_orientation() but operates on scaled pixel coords
+    (keypoint_size → intrinsic_size) instead of back-projected world coords.
+    Returns (u, v, theta) where (u, v) are at intrinsic resolution (e.g. 1920×1080).
+    """
+    start_idx, end_idx = ORIENTATION_PAIRS[segment_name]
+
+    def _valid_uv(kp_idx):
+        kp = raw_kps[kp_idx]
+        return (float(kp[0] * sx), float(kp[1] * sy)) if kp[2] >= conf_thresh else None
+
+    start_uv = _valid_uv(start_idx)
+    end_uv = _valid_uv(end_idx)
+
+    if start_uv is not None and end_uv is not None:
+        u = (start_uv[0] + end_uv[0]) / 2.0
+        v = (start_uv[1] + end_uv[1]) / 2.0
+        if ORIENTATION_MODES[segment_name] == "direct":
+            theta = orientation_from_vector(start_uv, end_uv)
+        else:
+            theta = orientation_from_pair(start_uv, end_uv)
+        return u, v, float(theta) if theta is not None else math.nan
+
+    fallback_points = []
+    for kp_idx in SEGMENT_FALLBACKS[segment_name]:
+        uv = _valid_uv(kp_idx)
+        if uv is not None:
+            fallback_points.append(uv)
+
+    if fallback_points:
+        return (
+            float(np.mean([pt[0] for pt in fallback_points])),
+            float(np.mean([pt[1] for pt in fallback_points])),
+            math.nan,
+        )
+
+    return math.nan, math.nan, math.nan
+
+
 def keypoint_to_intrinsic_scale(
     keypoint_size: tuple[int, int] = KEYPOINT_IMAGE_SIZE,
     intrinsic_size: tuple[int, int] = INTRINSIC_IMAGE_SIZE,
@@ -627,6 +680,7 @@ def process_vitpose_json(
     tvec = camera_params["tvec"]
     camera_model = camera_params.get("model", DEFAULT_CAMERA_MODEL)
     R, _ = cv2.Rodrigues(rvec)
+    sx, sy = keypoint_to_intrinsic_scale()
 
     records = []
     plot_samples: dict[str, dict] = {}
@@ -646,6 +700,7 @@ def process_vitpose_json(
         world_by_track: dict[str, list] = {}
 
         segment_rows = {segment_name: [] for segment_name in ORIENTATION_PAIRS}
+        pixel_segment_rows = {segment_name: [] for segment_name in ORIENTATION_PAIRS}
         for track_id in sorted_track_ids:
             raw_kps = keypoints_by_track[track_id]
             kp_world = project_person_keypoints_to_world(
@@ -661,6 +716,10 @@ def process_vitpose_json(
             for segment_name in ORIENTATION_PAIRS:
                 x, y, theta = segment_xy_and_orientation(kp_world, segment_name)
                 segment_rows[segment_name].append([str(track_id), x, y, theta])
+                u, v, theta_px = segment_xy_and_orientation_pixel(
+                    raw_kps, segment_name, sx, sy, conf_thresh
+                )
+                pixel_segment_rows[segment_name].append([str(track_id), u, v, theta_px])
 
             if capture_plot:
                 raw_by_track[str(track_id)] = raw_kps
@@ -672,6 +731,13 @@ def process_vitpose_json(
                 spacefeat[segment_name] = np.array(rows, dtype=object)
             else:
                 spacefeat[segment_name] = np.empty((0, 4), dtype=object)
+
+        pixelcoords = {}
+        for segment_name, rows in pixel_segment_rows.items():
+            if rows:
+                pixelcoords[segment_name] = np.array(rows, dtype=object)
+            else:
+                pixelcoords[segment_name] = np.empty((0, 4), dtype=object)
 
         # Compute wall-clock time and look up GT groups
         time_str = ""
@@ -694,6 +760,7 @@ def process_vitpose_json(
                 "timestamp": str(frame_id),
                 "time": time_str,
                 "spaceFeat": spacefeat,
+                "pixelCoords": pixelcoords,
                 "groups": gt_group,
                 "group_ids": [],
             }
