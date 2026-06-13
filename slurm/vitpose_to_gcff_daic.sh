@@ -4,7 +4,7 @@
 #SBATCH --qos=short
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=16G
 #SBATCH --time=0:30:00
 #SBATCH --mail-type=END
 #SBATCH --output=/home/nfs/zli33/slurm_outputs/vitpose-conflab/to_gcff_%j.out
