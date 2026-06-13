@@ -22,7 +22,9 @@ Output pkl schema (GCFF-compatible):
   row_id, Cam, Vid, Seg, Timestamp, concat_ts,
   pixelCoords, spaceCoords, pixelFeat, spaceFeat, GT
 
-  spaceFeat per row: {clue: (N, 4) float64  [person_id, x_m, y_m, alpha]}
+  spaceFeat per row:   {clue: (N, 4) float64  [person_id, x_m, y_m, alpha]}
+  pixelCoords per row: {clue: (N, 4) float64  [person_id, u_rel, v_rel, alpha]}
+                       u_rel = u/1920, v_rel = v/1080  (both in [0, 1])
   concat_ts:  continuous 0-based timeline per (Cam, Vid) pair, +1 gap at
               segment boundaries, sorted by ascending Seg within each pair.
 
@@ -81,10 +83,12 @@ def _normalise_spacefeat(sf: dict, world_scale: float) -> dict:
 
 
 def _normalise_pixelcoords(pc: dict | None) -> dict | None:
-    """Convert object-dtype per-clue pixel arrays to float64.
+    """Convert object-dtype per-clue pixel arrays to float64 with relative coords.
 
-    No coordinate scaling — pixel coords are already in absolute intrinsic
-    resolution (1920×1080) and need no unit conversion.
+    u and v are divided by the intrinsic image width (1920) and height (1080),
+    yielding values in [0, 1] that are resolution-agnostic.
+
+    Columns: [person_id, u_rel, v_rel, orientation]
     """
     if pc is None:
         return None
@@ -94,7 +98,11 @@ def _normalise_pixelcoords(pc: dict | None) -> dict | None:
         if arr is None or (hasattr(arr, "__len__") and len(arr) == 0):
             out[clue] = np.empty((0, 4), dtype=np.float64)
             continue
-        out[clue] = np.asarray(arr, dtype=np.float64)
+        arr_f = np.asarray(arr, dtype=np.float64)
+        if arr_f.shape[0] > 0 and arr_f.shape[1] >= 3:
+            arr_f[:, 1] /= 1920.0  # u → [0, 1]
+            arr_f[:, 2] /= 1080.0  # v → [0, 1]
+        out[clue] = arr_f
     return out
 
 
