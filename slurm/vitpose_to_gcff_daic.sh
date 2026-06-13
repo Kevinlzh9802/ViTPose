@@ -3,7 +3,7 @@
 #SBATCH --partition=insy,general
 #SBATCH --qos=short
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
 #SBATCH --time=0:30:00
 #SBATCH --mail-type=END
