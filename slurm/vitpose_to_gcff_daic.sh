@@ -20,7 +20,7 @@ SIF="${SIF:-${NEON}/apptainer/vitpose-0.0.5.sif}"
 
 VITPOSE_ROOT="${VITPOSE_ROOT:-${NEON}/zonghuan/data/conflab/vitpose_dataframe}"
 OUTPUT="${OUTPUT:-${NEON}/zonghuan/data/conflab/GCFF/data.pkl}"
-WORLD_SCALE="${WORLD_SCALE:-0.01}"
+WORLD_SCALE="${WORLD_SCALE:-1.0}"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
