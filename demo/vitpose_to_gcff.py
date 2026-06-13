@@ -15,16 +15,18 @@ Expected layout per camera:
 
 Input pkl schema (one per batch, from vitpose_to_dataframe.py):
   index:    frame_id (int-valued string)
-  columns:  timestamp, time, spaceFeat, groups, group_ids
+  columns:  timestamp, time, spaceFeat, pixelFeat, groups, group_ids
   spaceFeat per row: {clue: (N, 4) object array  [str_person_id, x_cm, y_cm, alpha]}
+  pixelFeat per row: {clue: (N, 4) object array  [str_person_id, u, v, alpha]}
+                     u/v in absolute pixels at intrinsic resolution (1920×1080)
 
 Output pkl schema (GCFF-compatible):
   row_id, Cam, Vid, Seg, Timestamp, concat_ts,
   pixelCoords, spaceCoords, pixelFeat, spaceFeat, GT
 
-  spaceFeat per row:   {clue: (N, 4) float64  [person_id, x_m, y_m, alpha]}
-  pixelCoords per row: {clue: (N, 4) float64  [person_id, u_rel, v_rel, alpha]}
-                       u_rel = u/1920, v_rel = v/1080  (both in [0, 1])
+  spaceFeat per row: {clue: (N, 4) float64  [person_id, x_m, y_m, alpha]}
+  pixelFeat per row: {clue: (N, 4) float64  [person_id, u_rel, v_rel, alpha]}
+                     u_rel = u/1920, v_rel = v/1080  (both in [0, 1])
   concat_ts:  continuous 0-based timeline per (Cam, Vid) pair, +1 gap at
               segment boundaries, sorted by ascending Seg within each pair.
 
@@ -203,7 +205,7 @@ def convert(
         vid = int(str(batch)[1])
         seg = int(str(batch)[2])
 
-        has_pixel = "pixelCoords" in df.columns
+        has_pixel = "pixelFeat" in df.columns
         rows_list = list(df.iterrows())
         new_df = pd.DataFrame({
             "Cam":        [cam] * len(df),
@@ -214,11 +216,11 @@ def convert(
                 _normalise_spacefeat(row["spaceFeat"], world_scale)
                 for _, row in rows_list
             ],
-            "pixelFeat":  [{} for _ in range(len(df))],
-            "pixelCoords": [
-                _normalise_pixelcoords(row["pixelCoords"]) if has_pixel else None
+            "pixelFeat":  [
+                _normalise_pixelcoords(row["pixelFeat"]) if has_pixel else None
                 for _, row in rows_list
             ],
+            "pixelCoords": [None] * len(df),
             "spaceCoords": [None] * len(df),
             "GT":          [[] for _ in range(len(df))],
         })

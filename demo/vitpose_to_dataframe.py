@@ -30,14 +30,14 @@ row represents one timestamp/frame and contains:
 
     - timestamp: frame id
     - spaceFeat:   dict with keys {head, shoulder, hip, foot}
-    - pixelCoords: dict with keys {head, shoulder, hip, foot}
+    - pixelFeat:   dict with keys {head, shoulder, hip, foot}
     - groups: empty list placeholder
     - group_ids: empty list placeholder
 
 Each spaceFeat entry is an (n_people, 4) object array containing:
     [person_id, x, y, orientation]
 
-Each pixelCoords entry is an (n_people, 4) object array containing:
+Each pixelFeat entry is an (n_people, 4) object array containing:
     [person_id, u, v, orientation]
 where (u, v) are absolute pixel coordinates at intrinsic resolution (1920×1080)
 and orientation is computed from the same keypoint pairs in pixel space.
@@ -760,7 +760,7 @@ def process_vitpose_json(
                 "timestamp": str(frame_id),
                 "time": time_str,
                 "spaceFeat": spacefeat,
-                "pixelCoords": pixelcoords,
+                "pixelFeat": pixelcoords,
                 "groups": gt_group,
                 "group_ids": [],
             }
