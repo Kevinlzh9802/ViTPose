@@ -449,7 +449,7 @@ def backproject_to_world(xn: float, yn: float, z_kp: float, R: np.ndarray, tvec:
     ray_cam = np.array([xn, yn, 1.0], dtype=np.float64)
     ray_world = R.T @ ray_cam
 
-    if abs(ray_world[2]) < 1e-9:
+    if ray_world[2] >= -1e-3:
         return None, None
 
     t = (z_kp - camera_center_world[2]) / ray_world[2]
@@ -738,6 +738,25 @@ def process_vitpose_json(
                 pixelcoords[segment_name] = np.array(rows, dtype=object)
             else:
                 pixelcoords[segment_name] = np.empty((0, 4), dtype=object)
+
+        # Drop persons with any NaN/None in spaceFeat position or orientation.
+        # A person is valid only when all four segments have finite x, y, theta.
+        if sorted_track_ids:
+            n = len(sorted_track_ids)
+            valid = np.ones(n, dtype=bool)
+            for rows in segment_rows.values():
+                for i, row in enumerate(rows):
+                    for val in row[1:]:  # x, y, theta
+                        try:
+                            if math.isnan(float(val)):
+                                valid[i] = False
+                        except (TypeError, ValueError):
+                            valid[i] = False
+            if not valid.all():
+                for seg in spacefeat:
+                    spacefeat[seg] = spacefeat[seg][valid]
+                for seg in pixelcoords:
+                    pixelcoords[seg] = pixelcoords[seg][valid]
 
         # Compute wall-clock time and look up GT groups
         time_str = ""
