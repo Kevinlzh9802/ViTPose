@@ -84,6 +84,38 @@ def _normalise_spacefeat(sf: dict, world_scale: float) -> dict:
     return out
 
 
+def _normalise_kp_pairs_space(kp_pairs: dict, world_scale: float) -> dict:
+    """Normalize spaceKpPairs: convert object dtype to float64 and apply world_scale to x/y."""
+    out = {}
+    for clue in CLUES:
+        arr = kp_pairs.get(clue) if isinstance(kp_pairs, dict) else None
+        if arr is None or (hasattr(arr, "__len__") and len(arr) == 0):
+            out[clue] = np.empty((0, 5), dtype=np.float64)
+            continue
+        a = np.asarray(arr, dtype=np.float64)  # (N, 5): [pid, x1, y1, x2, y2]
+        if world_scale != 1.0 and a.shape[0] > 0:
+            a[:, 1] *= world_scale; a[:, 2] *= world_scale
+            a[:, 3] *= world_scale; a[:, 4] *= world_scale
+        out[clue] = a
+    return out
+
+
+def _normalise_kp_pairs_pixel(kp_pairs: dict) -> dict:
+    """Normalize pixelKpPairs: convert to float64 and divide u/v by 1920/1080."""
+    out = {}
+    for clue in CLUES:
+        arr = kp_pairs.get(clue) if isinstance(kp_pairs, dict) else None
+        if arr is None or (hasattr(arr, "__len__") and len(arr) == 0):
+            out[clue] = np.empty((0, 5), dtype=np.float64)
+            continue
+        a = np.asarray(arr, dtype=np.float64)  # (N, 5): [pid, u1, v1, u2, v2]
+        if a.shape[0] > 0:
+            a[:, 1] /= 1920.0; a[:, 2] /= 1080.0
+            a[:, 3] /= 1920.0; a[:, 4] /= 1080.0
+        out[clue] = a
+    return out
+
+
 def _normalise_pixelcoords(pc: dict | None) -> dict | None:
     """Convert object-dtype per-clue pixel arrays to float64 with relative coords.
 
@@ -206,6 +238,7 @@ def convert(
         seg = int(str(batch)[2])
 
         has_pixel = "pixelFeat" in df.columns
+        has_kp_pairs = "spaceCoords" in df.columns
         rows_list = list(df.iterrows())
         new_df = pd.DataFrame({
             "Cam":        [cam] * len(df),
@@ -220,8 +253,16 @@ def convert(
                 _normalise_pixelcoords(row["pixelFeat"]) if has_pixel else None
                 for _, row in rows_list
             ],
-            "pixelCoords": [None] * len(df),
-            "spaceCoords": [None] * len(df),
+            "spaceCoords": [
+                _normalise_kp_pairs_space(row["spaceCoords"], world_scale)
+                if has_kp_pairs else {c: np.empty((0, 5), dtype=np.float64) for c in CLUES}
+                for _, row in rows_list
+            ],
+            "pixelCoords": [
+                _normalise_kp_pairs_pixel(row["pixelCoords"])
+                if has_kp_pairs else {c: np.empty((0, 5), dtype=np.float64) for c in CLUES}
+                for _, row in rows_list
+            ],
             "GT":          [[] for _ in range(len(df))],
         })
 

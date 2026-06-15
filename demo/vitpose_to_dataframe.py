@@ -549,6 +549,42 @@ def segment_xy_and_orientation_pixel(
     return math.nan, math.nan, math.nan
 
 
+def segment_kp_pair(kp_world: list, segment_name: str) -> tuple[float, float, float, float]:
+    """Return (x1, y1, x2, y2) world coords for the two paired keypoints.
+
+    kp1 = ORIENTATION_PAIRS[segment_name][0], kp2 = [1].
+    Returns NaN for a keypoint that is below confidence threshold or not projected.
+    """
+    start_idx, end_idx = ORIENTATION_PAIRS[segment_name]
+    xy1 = valid_world_xy(kp_world, start_idx)
+    xy2 = valid_world_xy(kp_world, end_idx)
+    x1, y1 = (xy1[0], xy1[1]) if xy1 is not None else (math.nan, math.nan)
+    x2, y2 = (xy2[0], xy2[1]) if xy2 is not None else (math.nan, math.nan)
+    return x1, y1, x2, y2
+
+
+def segment_kp_pair_pixel(
+    raw_kps: list,
+    segment_name: str,
+    sx: float,
+    sy: float,
+    conf_thresh: float,
+) -> tuple[float, float, float, float]:
+    """Return (u1, v1, u2, v2) pixel coords (at intrinsic resolution) for the two
+    paired keypoints.  Returns NaN for a keypoint below confidence threshold."""
+    start_idx, end_idx = ORIENTATION_PAIRS[segment_name]
+
+    def _uv(idx):
+        kp = raw_kps[idx]
+        return (float(kp[0] * sx), float(kp[1] * sy)) if kp[2] >= conf_thresh else None
+
+    uv1 = _uv(start_idx)
+    uv2 = _uv(end_idx)
+    u1, v1 = (uv1[0], uv1[1]) if uv1 is not None else (math.nan, math.nan)
+    u2, v2 = (uv2[0], uv2[1]) if uv2 is not None else (math.nan, math.nan)
+    return u1, v1, u2, v2
+
+
 def keypoint_to_intrinsic_scale(
     keypoint_size: tuple[int, int] = KEYPOINT_IMAGE_SIZE,
     intrinsic_size: tuple[int, int] = INTRINSIC_IMAGE_SIZE,
@@ -701,6 +737,8 @@ def process_vitpose_json(
 
         segment_rows = {segment_name: [] for segment_name in ORIENTATION_PAIRS}
         pixel_segment_rows = {segment_name: [] for segment_name in ORIENTATION_PAIRS}
+        space_kp_pair_rows = {segment_name: [] for segment_name in ORIENTATION_PAIRS}
+        pixel_kp_pair_rows = {segment_name: [] for segment_name in ORIENTATION_PAIRS}
         for track_id in sorted_track_ids:
             raw_kps = keypoints_by_track[track_id]
             kp_world = project_person_keypoints_to_world(
@@ -720,6 +758,10 @@ def process_vitpose_json(
                     raw_kps, segment_name, sx, sy, conf_thresh
                 )
                 pixel_segment_rows[segment_name].append([str(track_id), u, v, theta_px])
+                x1, y1, x2, y2 = segment_kp_pair(kp_world, segment_name)
+                space_kp_pair_rows[segment_name].append([str(track_id), x1, y1, x2, y2])
+                u1, v1, u2, v2 = segment_kp_pair_pixel(raw_kps, segment_name, sx, sy, conf_thresh)
+                pixel_kp_pair_rows[segment_name].append([str(track_id), u1, v1, u2, v2])
 
             if capture_plot:
                 raw_by_track[str(track_id)] = raw_kps
@@ -739,6 +781,20 @@ def process_vitpose_json(
             else:
                 pixelcoords[segment_name] = np.empty((0, 4), dtype=object)
 
+        space_kp_pairs = {}
+        for segment_name, rows in space_kp_pair_rows.items():
+            if rows:
+                space_kp_pairs[segment_name] = np.array(rows, dtype=object)
+            else:
+                space_kp_pairs[segment_name] = np.empty((0, 5), dtype=object)
+
+        pixel_kp_pairs = {}
+        for segment_name, rows in pixel_kp_pair_rows.items():
+            if rows:
+                pixel_kp_pairs[segment_name] = np.array(rows, dtype=object)
+            else:
+                pixel_kp_pairs[segment_name] = np.empty((0, 5), dtype=object)
+
         # Drop persons with any NaN/None in spaceFeat position or orientation.
         # A person is valid only when all four segments have finite x, y, theta.
         if sorted_track_ids:
@@ -757,6 +813,10 @@ def process_vitpose_json(
                     spacefeat[seg] = spacefeat[seg][valid]
                 for seg in pixelcoords:
                     pixelcoords[seg] = pixelcoords[seg][valid]
+                for seg in space_kp_pairs:
+                    space_kp_pairs[seg] = space_kp_pairs[seg][valid]
+                for seg in pixel_kp_pairs:
+                    pixel_kp_pairs[seg] = pixel_kp_pairs[seg][valid]
 
         # Compute wall-clock time and look up GT groups
         time_str = ""
@@ -780,6 +840,8 @@ def process_vitpose_json(
                 "time": time_str,
                 "spaceFeat": spacefeat,
                 "pixelFeat": pixelcoords,
+                "spaceCoords": space_kp_pairs,
+                "pixelCoords": pixel_kp_pairs,
                 "groups": gt_group,
                 "group_ids": [],
             }
