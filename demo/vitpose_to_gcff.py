@@ -116,6 +116,45 @@ def _normalise_kp_pairs_pixel(kp_pairs: dict) -> dict:
     return out
 
 
+def _fix_orientation_outlier(sf: dict) -> dict:
+    """Flip the one segment orientation that is opposite to the other three.
+
+    For each person, collect the 4 orientations (one per clue in CLUES order).
+    Convert each to a 2-D unit vector (cos θ, sin θ) and compute all pairwise
+    dot products.  Exactly one orientation qualifies as the "odd one out" when:
+
+        • its dot product with every other orientation is negative  (> 90° apart)
+        • every pair among the remaining three has a positive dot product  (< 90°)
+
+    In that case the orientation is reversed by adding π.  All other
+    configurations (0, 2, 3, or 4 outliers) are left unchanged.
+    """
+    n_clues = len(CLUES)
+    sf = {k: v.copy() for k, v in sf.items()}
+    n_people = sf[CLUES[0]].shape[0] if CLUES[0] in sf else 0
+
+    for i in range(n_people):
+        thetas = np.array([sf[clue][i, 3] for clue in CLUES])
+        if np.isnan(thetas).any():
+            continue
+
+        vecs = np.stack([np.cos(thetas), np.sin(thetas)], axis=1)  # (4, 2)
+        dots = vecs @ vecs.T  # (4, 4)
+
+        odd = None
+        for j in range(n_clues):
+            others = [k for k in range(n_clues) if k != j]
+            if (all(dots[j, k] < 0 for k in others) and
+                    all(dots[k, l] > 0 for k in others for l in others if k != l)):
+                odd = j
+                break
+
+        if odd is not None:
+            sf[CLUES[odd]][i, 3] += np.pi
+
+    return sf
+
+
 def _normalise_pixelcoords(pc: dict | None) -> dict | None:
     """Convert object-dtype per-clue pixel arrays to float64 with relative coords.
 
@@ -246,7 +285,7 @@ def convert(
             "Seg":        [seg] * len(df),
             "Timestamp":  list(range(len(df))),
             "spaceFeat":  [
-                _normalise_spacefeat(row["spaceFeat"], world_scale)
+                _fix_orientation_outlier(_normalise_spacefeat(row["spaceFeat"], world_scale))
                 for _, row in rows_list
             ],
             "pixelFeat":  [
