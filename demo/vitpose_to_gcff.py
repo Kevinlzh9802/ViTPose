@@ -155,6 +155,34 @@ def _fix_orientation_outlier(sf: dict) -> dict:
     return sf
 
 
+def _filter_position_outliers(sf: dict, max_dist: float = 1.0) -> dict:
+    """Remove persons whose 4 segment positions span more than max_dist.
+
+    Computes all 6 pairwise (x, y) distances across the 4 clues. Any person
+    whose maximum pairwise distance exceeds max_dist is dropped from every
+    clue. Pass max_dist in the same units as the spaceFeat positions.
+    """
+    sf = {k: v.copy() for k, v in sf.items()}
+    n_people = sf[CLUES[0]].shape[0] if CLUES[0] in sf else 0
+    if n_people == 0:
+        return sf
+
+    # (4, N, 2) — one (x, y) per clue per person
+    positions = np.stack([sf[clue][:, 1:3] for clue in CLUES], axis=0)
+
+    keep = np.ones(n_people, dtype=bool)
+    for j in range(len(CLUES)):
+        for k in range(j + 1, len(CLUES)):
+            dists = np.linalg.norm(positions[j] - positions[k], axis=1)
+            keep &= dists <= max_dist
+
+    if not keep.all():
+        for clue in CLUES:
+            sf[clue] = sf[clue][keep]
+
+    return sf
+
+
 def _normalise_pixelcoords(pc: dict | None) -> dict | None:
     """Convert object-dtype per-clue pixel arrays to float64 with relative coords.
 
@@ -285,7 +313,12 @@ def convert(
             "Seg":        [seg] * len(df),
             "Timestamp":  list(range(len(df))),
             "spaceFeat":  [
-                _fix_orientation_outlier(_normalise_spacefeat(row["spaceFeat"], world_scale))
+                _filter_position_outliers(
+                    _fix_orientation_outlier(
+                        _normalise_spacefeat(row["spaceFeat"], world_scale)
+                    ),
+                    max_dist=100.0 * world_scale,
+                )
                 for _, row in rows_list
             ],
             "pixelFeat":  [
